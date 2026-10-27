@@ -1,0 +1,10 @@
+{
+  "name": "WaterSplash.MlsMpm.Editor",
+  "rootNamespace": "WaterSplash.Editor",
+  "references": [
+    "WaterSplash.MlsMpm",
+    "Unity.RenderPipelines.Universal.Runtime"
+  ],
+  "includePlatforms": ["Editor"],
+  "autoReferenced": true
+}

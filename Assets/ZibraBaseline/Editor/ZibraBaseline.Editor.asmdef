@@ -1,0 +1,11 @@
+{
+    "name": "WaterSplash.ZibraBaseline.Editor",
+    "references": [
+        "WaterSplash.ZibraBaseline",
+        "ZibraAILiquid",
+        "Unity.RenderPipelines.Universal.Runtime",
+        "Unity.RenderPipelines.Core.Runtime"
+    ],
+    "includePlatforms": ["Editor"],
+    "autoReferenced": true
+}
