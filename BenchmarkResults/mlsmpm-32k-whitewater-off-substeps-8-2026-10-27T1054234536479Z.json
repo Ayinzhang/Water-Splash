@@ -1,0 +1,70 @@
+{
+    "capturedUtc": "2026-10-27T10:54:23.4536479Z",
+    "unityVersion": "2022.3.62f3",
+    "device": "Intel(R) UHD Graphics",
+    "graphicsApi": "Direct3D11",
+    "operatingSystem": "Windows 11  (10.0.26200) 64bit",
+    "measurement": "Synchronized solver wall time: CPU submission + GPU completion + 32-byte readback; no rendering. Not isolated GPU timing.",
+    "scenario": "Fixed 4m container, fixed initial water block, sphere at (0.95,0.55,0), kick every two simulation seconds starting at second 1.",
+    "note": "Desktop solver diagnostic, not an equal-volume Zibra comparison or a phone/frame-rate result.",
+    "particles": 32768,
+    "grid": 48,
+    "substeps": 8,
+    "warmupTicks": 12,
+    "measuredTicks": 60,
+    "validatedTicks": 600,
+    "whitewater": false,
+    "status": "complete",
+    "millisecondsPerTick": 32.47592,
+    "simulatedSecondsPerWallSecond": 0.513200755103063,
+    "medianBatchMillisecondsPerTick": 32.505700000000008,
+    "p95BatchMillisecondsPerTick": 35.434425000000008,
+    "finalState": {
+        "particleCount": 32768,
+        "nonFiniteParticles": 0,
+        "outsideParticles": 0,
+        "insideSphereParticles": 0,
+        "gridMass": 32767.932708740234,
+        "center": {
+            "x": 31.794952392578126,
+            "y": 6.558530330657959,
+            "z": 22.875774383544923
+        },
+        "minimum": {
+            "x": 2.0721964836120607,
+            "y": 2.0,
+            "z": 2.089050054550171
+        },
+        "maximum": {
+            "x": 45.0,
+            "y": 37.34966278076172,
+            "z": 44.968894958496097
+        },
+        "maximumSpeed": 6.7115983963012699,
+        "peakDensityRatio": 2.1533203125,
+        "faults": 0,
+        "simulatedSeconds": 10.000000000000077
+    },
+    "peakFoam": 0,
+    "peakSpray": 0,
+    "whitewaterBorn": 0,
+    "whitewaterExpired": 0,
+    "invalidWhitewater": 0,
+    "batchMillisecondsPerTick": [
+        35.434425000000008,
+        35.052625,
+        34.94375,
+        33.926625,
+        33.455925,
+        32.856775,
+        32.505700000000008,
+        32.173725000000008,
+        31.172250000000003,
+        31.086475,
+        30.9616,
+        32.741625,
+        30.64945,
+        30.24585,
+        29.932000000000003
+    ]
+}

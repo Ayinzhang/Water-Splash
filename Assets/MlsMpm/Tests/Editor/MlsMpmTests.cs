@@ -127,6 +127,63 @@ namespace WaterSplash.Tests
             Assert.That(pushed.simulatedSeconds, Is.EqualTo(4).Within(1e-8));
         }
 
+        [Test]
+        public void ComparisonImportPreservesWorldPositionsAndRestSpacing()
+        {
+            fluid.transform.position = new Vector3(-2, 0, -2);
+            fluid.Initialize();
+            float spacing = 0.2f;
+            var positions = new Vector3[512];
+            Vector3 mean = Vector3.zero;
+            for (int i = 0; i < positions.Length; i++)
+            {
+                positions[i] = new Vector3(-1.5f, 0.5f, -1.5f) +
+                    spacing * new Vector3(i % 8, (i / 8) % 8, i / 64);
+                mean += positions[i];
+            }
+            mean /= positions.Length;
+            fluid.SetComparisonInitialPositions(positions, spacing);
+            MlsMpmFluid.Snapshot imported = fluid.CaptureSnapshot();
+            Vector3 worldMean = imported.center * fluid.CellSize + fluid.GridOrigin;
+            Assert.That(Vector3.Distance(worldMean, mean), Is.LessThan(0.0001f));
+            Assert.That(fluid.RestDensity, Is.EqualTo(Mathf.Pow(fluid.CellSize / spacing, 3)).Within(0.0001f));
+            Assert.That(imported.maximumSpeed, Is.Zero);
+            Assert.That(imported.simulatedSeconds, Is.Zero);
+        }
+
+        [Test]
+        public void ComparisonImportRejectsChangesAfterSimulationStarts()
+        {
+            fluid.StepSimulation(1);
+            Assert.Throws<System.ArgumentException>(() =>
+                fluid.SetComparisonInitialPositions(new Vector3[512], 0.2f));
+        }
+
+        [TestCase(32, 4)]
+        [TestCase(48, 8)]
+        [TestCase(64, 12)]
+        [TestCase(80, 16)]
+        public void FinerGridPresetsIncreaseSubsteps(int grid, int expected)
+        {
+            Assert.That(MlsMpmFluid.RecommendedSubsteps(grid), Is.EqualTo(expected));
+        }
+
+        [Test]
+        public void ReinitializeDropsOldVelocityAndDiagnosticGeneration()
+        {
+            fluid.StepSimulation(12);
+            for (int i = 0; i < 4; i++)
+            {
+                fluid.gridResolution = i % 2 == 0 ? 32 : 16;
+                fluid.particleCount = i % 2 == 0 ? 4096 : 512;
+                fluid.Initialize();
+                AssertHealthy(fluid.CaptureSnapshot());
+                Assert.That(fluid.CaptureSnapshot().maximumSpeed, Is.Zero);
+                fluid.StepSimulation(4);
+                AssertHealthy(fluid.CaptureSnapshot());
+            }
+        }
+
         static void AssertHealthy(MlsMpmFluid.Snapshot state)
         {
             Assert.That(state.faults, Is.Zero, "GPU fault bits");

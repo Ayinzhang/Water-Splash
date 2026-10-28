@@ -14,6 +14,7 @@ namespace WaterSplash
         public Vector3 absorption = new Vector3(2.5f, 0.7f, 0.3f);
         [Range(0, 0.2f)] public float refraction = 0.08f;
         [Range(0.5f, 4)] public float surfaceSmoothing = 2.5f;
+        public bool continuousFoam = true;
 
         Material particleMaterial;
         Material surfaceMaterial;
@@ -83,6 +84,15 @@ namespace WaterSplash
             readonly MlsMpmSurfaceFeature owner;
             readonly MaterialPropertyBlock properties = new MaterialPropertyBlock();
             readonly ProfilingSampler profiler = new ProfilingSampler("MLS-MPM/Continuous water");
+            static readonly UnityEngine.Profiling.CustomSampler[] renderStages = {
+                UnityEngine.Profiling.CustomSampler.Create("MPM Render/Depth", true),
+                UnityEngine.Profiling.CustomSampler.Create("MPM Render/Thickness", true),
+                UnityEngine.Profiling.CustomSampler.Create("MPM Render/Smoothing", true),
+                UnityEngine.Profiling.CustomSampler.Create("MPM Render/Normals", true),
+                UnityEngine.Profiling.CustomSampler.Create("MPM Render/Foam", true),
+                UnityEngine.Profiling.CustomSampler.Create("MPM Render/Shading", true),
+                UnityEngine.Profiling.CustomSampler.Create("MPM Render/Spray", true)
+            };
             RTHandle rawDepth;
             RTHandle particleDepth;
             RTHandle smoothA;
@@ -169,17 +179,18 @@ namespace WaterSplash
                             owner.absorption.x, owner.absorption.y, owner.absorption.z, 0));
                         cmd.SetGlobalColor("_FluidWaterColor", owner.waterColor);
                         cmd.SetGlobalFloat("_FluidRefraction", owner.refraction);
+                        cmd.SetGlobalFloat("_ContinuousFoam", owner.continuousFoam ? 1 : 0);
 
-                        cmd.BeginSample("MLS-MPM/Surface depth");
+                        cmd.BeginSample(renderStages[0]);
                         CoreUtils.SetRenderTarget(cmd, rawDepth, particleDepth, ClearFlag.All, Color.clear);
                         DrawParticles(cmd, 0);
-                        cmd.EndSample("MLS-MPM/Surface depth");
-                        cmd.BeginSample("MLS-MPM/Surface thickness");
+                        cmd.EndSample(renderStages[0]);
+                        cmd.BeginSample(renderStages[1]);
                         CoreUtils.SetRenderTarget(cmd, thickness, ClearFlag.Color, Color.clear);
                         DrawParticles(cmd, 1);
-                        cmd.EndSample("MLS-MPM/Surface thickness");
+                        cmd.EndSample(renderStages[1]);
 
-                        cmd.BeginSample("MLS-MPM/Surface smoothing");
+                        cmd.BeginSample(renderStages[2]);
                         cmd.SetGlobalTexture("_FluidThickness", thickness.nameID);
                         RTHandle source = rawDepth;
                         for (int i = 0; i < iterations; i++)
@@ -189,25 +200,25 @@ namespace WaterSplash
                             Smooth(cmd, smoothA, smoothB, Vector2.up, false);
                             source = smoothB;
                         }
-                        cmd.EndSample("MLS-MPM/Surface smoothing");
+                        cmd.EndSample(renderStages[2]);
                         cmd.SetGlobalTexture("_FluidDepth", source.nameID);
-                        cmd.BeginSample("MLS-MPM/Surface normals");
+                        cmd.BeginSample(renderStages[3]);
                         CoreUtils.SetRenderTarget(cmd, normals);
                         cmd.DrawProcedural(Matrix4x4.identity, owner.surfaceMaterial, 2, MeshTopology.Triangles, 3, 1);
-                        cmd.EndSample("MLS-MPM/Surface normals");
-                        cmd.BeginSample("MLS-MPM/Foam coverage");
+                        cmd.EndSample(renderStages[3]);
+                        cmd.BeginSample(renderStages[4]);
                         CoreUtils.SetRenderTarget(cmd, foam, ClearFlag.Color, Color.clear);
                         DrawWhitewater(cmd, 2, true);
                         cmd.SetGlobalTexture("_FluidFoam", foam.nameID);
-                        cmd.EndSample("MLS-MPM/Foam coverage");
-                        cmd.BeginSample("MLS-MPM/Surface shading");
+                        cmd.EndSample(renderStages[4]);
+                        cmd.BeginSample(renderStages[5]);
                         cmd.SetGlobalTexture("_FluidNormals", normals.nameID);
                         CoreUtils.SetRenderTarget(cmd, cameraColor, cameraDepth);
                         cmd.DrawProcedural(Matrix4x4.identity, owner.surfaceMaterial, 1, MeshTopology.Triangles, 3, 1);
-                        cmd.EndSample("MLS-MPM/Surface shading");
-                        cmd.BeginSample("MLS-MPM/Spray rendering");
+                        cmd.EndSample(renderStages[5]);
+                        cmd.BeginSample(renderStages[6]);
                         DrawWhitewater(cmd, 3, false);
-                        cmd.EndSample("MLS-MPM/Spray rendering");
+                        cmd.EndSample(renderStages[6]);
                     }
                     context.ExecuteCommandBuffer(cmd);
                     foreach (MlsMpmFluid fluid in owner.visible) fluid.MarkSurfaceRendered();

@@ -1,0 +1,6 @@
+{
+  "name": "WaterSplash.FluidComparison.Editor",
+  "references": ["WaterSplash.FluidComparison", "WaterSplash.MlsMpm", "ZibraAILiquid", "Unity.RenderPipelines.Universal.Runtime", "Unity.RenderPipelines.Core.Runtime"],
+  "includePlatforms": ["Editor"],
+  "autoReferenced": true
+}

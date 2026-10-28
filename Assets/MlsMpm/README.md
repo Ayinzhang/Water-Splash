@@ -30,6 +30,19 @@ real-time simulation. Application suspension and explicit pause do not accrue ti
 
 ## Algorithm and limits
 
+The single-pool comparison defaults to 8 substeps (separate from this demo's
+conservative per-preset recommendations). The RTX 5070 Ti Laptop / D3D11 passed
+a 20-second 128K/80^3/8-substep moving-sphere run at ~60 FPS average, 720p High.
+P95 frame time was 24.02ms. This is an Editor result, not an Android guarantee.
+See `BenchmarkResults/RTX-Mobile-2026-10-27.md`.
+
+Advected surface foam uses a continuous density field made from overlapping
+flow-aligned footprints, depth-aware filtering and fine world-space detail,
+instead of showing each foam seed as a round white sprite. Spray remains ballistic.
+The renderer feature's `continuousFoam` toggle preserves the original rendering
+for same-state comparisons. No extra whitewater particles or neighbor search are
+introduced. Optional experimental affine/divergence damping is zero by default.
+
 Particles store position, velocity and the three rows of the affine velocity
 matrix, using five aligned float4 fields (80 bytes). Quadratic B-spline transfers
 sample 27 grid nodes. Each substep clears the grid, transfers mass/momentum,
@@ -172,6 +185,39 @@ The particle debug mode remains available.
 
 ## Device experiment
 
+The current target is to approach the desktop Zibra baseline's motion, water
+surface and performance with this independent solver, then validate this solver
+on Redmi K90 Pro Max. The imported Zibra package is a desktop reference and does
+not need to ship on Android. Match water volume, camera, impact and output
+resolution before claiming parity; particle count alone is not an equal-work
+or equal-quality comparison.
+
+The `32K / 4 steps*` button is an explicitly experimental alternative to the
+unchanged 32K/48^3/8-step default. It retains 32K liquid particles and the 32K
+secondary pool, reducing time integration work rather than visual resolution.
+It passed one ten-second repeated-kick scenario on Intel UHD/D3D11, but fewer
+substeps change the trajectory and are not guaranteed stable for arbitrary
+forces, stiffness or obstacle movement. Select the normal 32K button to restore
+eight substeps. This does not establish equivalent appearance to Zibra.
+
+### Reproducible desktop solver diagnostic
+
+Outside Play Mode, use **Water Splash > Benchmark** for whitewater on/off at
+eight substeps or the experimental four-/six-substep runs. Results are saved as
+timestamped JSON files in the project-root `BenchmarkResults/` directory.
+The temporary hidden objects are destroyed after the run; no scene is saved.
+The run warms up for 12 ticks, measures the next 60 ticks in batches of four,
+then validates through ten simulated seconds with repeated kicks. Later impacts
+are validated but are outside the timing window.
+
+Each measured batch waits for GPU completion using a 32-byte diagnostic readback.
+Reported times include CPU submission, completed GPU work and readback overhead;
+they are **not isolated GPU times**, rendered-frame times or phone measurements.
+The displayed ratio compares completed simulated time with measured batch wall
+time, excluding editor-update gaps. Whole-frame performance still needs the
+actual renderer and the simulation backlog check. See `BenchmarkResults/README.md`
+for this session's measurements and limitations.
+
 For an Android build, include the demo scene in Build Settings and select Vulkan
 in Android Player Settings. This prototype does not change the project's build
 target, signing settings, render pipeline selection or global quality settings
@@ -201,6 +247,17 @@ transport/lifetime/expiry, bounded non-multiple capacities, independent disablin
 the higher-detail presets and resolution-invariant initial physical bounds.
 `CaptureSnapshot()` is an explicit synchronous diagnostic operation for tests
 and investigation; it is not called each frame.
+
+### October 27 stability and performance investigation
+
+The comparison now restores recommended 4/8/12/16 substeps when switching
+16K/32K/64K/128K presets. A retained 4-step setting reproduced fault 16 at
+64K tick 23 and 128K tick 21. Collider motion is swept through substeps, and
+R can reset the standalone solver after a fault. Fault guards remain enabled.
+The current stage markers support GPU timestamp recording; moving-sphere and
+runtime-switch validation menus write structured reports in BenchmarkResults.
+See `BenchmarkResults/Investigation-2026-10-27.md` for measured transmission
+bottlenecks, limitations, GPU driver diagnosis, and the PB-MPM/PBF/FLIP assessment.
 
 Algorithm references (this implementation is independently written):
 

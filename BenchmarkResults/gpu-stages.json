@@ -1,0 +1,61 @@
+{
+    "utc": "2026-10-27T12:19:53.7752741Z",
+    "gpu": "Intel(R) UHD Graphics",
+    "api": "Direct3D11",
+    "status": "captured",
+    "particles": 32768,
+    "grid": 48,
+    "substeps": 8,
+    "note": "Unity GPU timestamp recorders, delayed three frames. msPerBlock is per dispatch, not per frame. No CPU submission time is mislabeled GPU time. Capture only one solver, steady workload.",
+    "stages": [
+        {
+            "name": "MLS-MPM GPU/Clear",
+            "frames": 135,
+            "blocks": 2160,
+            "totalMs": 127.53805599999997,
+            "msPerBlock": 0.05904539629629628
+        },
+        {
+            "name": "MLS-MPM GPU/Mass + momentum",
+            "frames": 135,
+            "blocks": 2160,
+            "totalMs": 3076.528416000002,
+            "msPerBlock": 1.424318711111112
+        },
+        {
+            "name": "MLS-MPM GPU/Stress",
+            "frames": 135,
+            "blocks": 2160,
+            "totalMs": 2878.0297900000005,
+            "msPerBlock": 1.3324211990740745
+        },
+        {
+            "name": "MLS-MPM GPU/Grid velocity",
+            "frames": 135,
+            "blocks": 2160,
+            "totalMs": 60.84046899999999,
+            "msPerBlock": 0.028166883796296294
+        },
+        {
+            "name": "MLS-MPM GPU/G2P + advection",
+            "frames": 135,
+            "blocks": 2160,
+            "totalMs": 766.4257220000001,
+            "msPerBlock": 0.35482672314814819
+        },
+        {
+            "name": "MLS-MPM GPU/Whitewater",
+            "frames": 135,
+            "blocks": 270,
+            "totalMs": 73.52661100000003,
+            "msPerBlock": 0.2723207814814816
+        },
+        {
+            "name": "MLS-MPM/Continuous water",
+            "frames": 135,
+            "blocks": 135,
+            "totalMs": 777.469872,
+            "msPerBlock": 5.759036088888889
+        }
+    ]
+}

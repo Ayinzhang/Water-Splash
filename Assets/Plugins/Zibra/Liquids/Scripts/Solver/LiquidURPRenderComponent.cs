@@ -9,6 +9,10 @@ namespace com.zibra.liquid
 {
     public class LiquidURPRenderComponent : ScriptableRendererFeature
     {
+        static readonly UnityEngine.Profiling.CustomSampler copyTiming = UnityEngine.Profiling.CustomSampler.Create("Zibra GPU/Background copy", true);
+        static readonly UnityEngine.Profiling.CustomSampler surfaceTiming = UnityEngine.Profiling.CustomSampler.Create("Zibra GPU/Native surface", true);
+        static readonly UnityEngine.Profiling.CustomSampler shadeTiming = UnityEngine.Profiling.CustomSampler.Create("Zibra GPU/Shading", true);
+        static readonly UnityEngine.Profiling.CustomSampler upscaleTiming = UnityEngine.Profiling.CustomSampler.Create("Zibra GPU/Upscale", true);
         [System.Serializable]
         public class LiquidURPRenderSettings
         {
@@ -49,12 +53,14 @@ namespace com.zibra.liquid
 
                 if (liquid.cameraResources.ContainsKey(camera))
                 {
+                    cmd.BeginSample(copyTiming);
 #if UNITY_PIPELINE_URP_9_0_OR_HIGHER
                     Blit(cmd, cameraColorTexture, liquid.cameraResources[camera].background);
 #else
                     // For some reason old version of URP don't want to blit texture via correct API
                     cmd.Blit(cameraColorTexture, liquid.cameraResources[camera].background);
 #endif
+                    cmd.EndSample(copyTiming);
                 }
 
                 context.ExecuteCommandBuffer(cmd);
@@ -143,14 +149,18 @@ namespace com.zibra.liquid
                     ZibraLiquidBridge.EventAndInstanceID(ZibraLiquidBridge.EventID.None, liquid.CurrentInstanceID),
                     liquid.camNativeParams[camera]);
 
+                cmd.BeginSample(surfaceTiming);
                 liquid.RenderParticlesNative(cmd);
+                cmd.EndSample(surfaceTiming);
 
                 if (liquid.EnableDownscale)
                 {
                     cmd.SetRenderTarget(upscaleColorTexture, upscaleDepthTexture);
                 }
 
+                cmd.BeginSample(shadeTiming);
                 liquid.RenderLiquidDirect(cmd, camera);
+                cmd.EndSample(shadeTiming);
 
                 context.ExecuteCommandBuffer(cmd);
                 CommandBufferPool.Release(cmd);
@@ -213,7 +223,9 @@ namespace com.zibra.liquid
 
                 upscaleColorTexture = new RenderTargetIdentifier(upscaleColorTextureID);
                 upscaleDepthTexture = new RenderTargetIdentifier(upscaleDepthTextureID);
+                cmd.BeginSample(upscaleTiming);
                 liquid.UpscaleLiquidDirect(cmd, camera, upscaleColorTexture, upscaleDepthTexture);
+                cmd.EndSample(upscaleTiming);
 
                 context.ExecuteCommandBuffer(cmd);
                 CommandBufferPool.Release(cmd);

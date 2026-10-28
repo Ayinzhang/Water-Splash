@@ -1,0 +1,327 @@
+{
+    "utc": "2026-10-27T13:42:40.4551204Z",
+    "gpu": "NVIDIA GeForce RTX 5070 Ti Laptop GPU",
+    "status": "passed",
+    "cases": [
+        {
+            "mode": "Zibra",
+            "status": "passed",
+            "particles": 32768,
+            "grid": 48,
+            "substeps": 8,
+            "ticks": 12,
+            "snapshot": {
+                "particleCount": 0,
+                "nonFiniteParticles": 0,
+                "outsideParticles": 0,
+                "insideSphereParticles": 0,
+                "gridMass": 0.0,
+                "center": {
+                    "x": 0.0,
+                    "y": 0.0,
+                    "z": 0.0
+                },
+                "minimum": {
+                    "x": 0.0,
+                    "y": 0.0,
+                    "z": 0.0
+                },
+                "maximum": {
+                    "x": 0.0,
+                    "y": 0.0,
+                    "z": 0.0
+                },
+                "maximumSpeed": 0.0,
+                "peakDensityRatio": 0.0,
+                "faults": 0,
+                "simulatedSeconds": 0.0,
+                "meanKineticEnergy": 0.0,
+                "meanAffineKineticEnergy": 0.0,
+                "meanPotentialEnergy": 0.0,
+                "meanCompressionEnergy": 0.0,
+                "maximumWorldHeight": 0.0,
+                "p99WorldHeight": 0.0
+            }
+        },
+        {
+            "mode": "MlsMpm",
+            "status": "passed",
+            "particles": 32768,
+            "grid": 48,
+            "substeps": 8,
+            "ticks": 180,
+            "snapshot": {
+                "particleCount": 32768,
+                "nonFiniteParticles": 0,
+                "outsideParticles": 0,
+                "insideSphereParticles": 0,
+                "gridMass": 32767.941040039063,
+                "center": {
+                    "x": 22.393922805786134,
+                    "y": 5.282235622406006,
+                    "z": 23.845699310302736
+                },
+                "minimum": {
+                    "x": 2.0,
+                    "y": 2.0,
+                    "z": 2.0
+                },
+                "maximum": {
+                    "x": 44.99809265136719,
+                    "y": 27.24652862548828,
+                    "z": 45.0
+                },
+                "maximumSpeed": 8.24349308013916,
+                "peakDensityRatio": 2.083984375,
+                "faults": 0,
+                "simulatedSeconds": 2.9999999999999944,
+                "meanKineticEnergy": 0.47983049743671687,
+                "meanAffineKineticEnergy": 0.023418508540832704,
+                "meanPotentialEnergy": 2.9952415103885245,
+                "meanCompressionEnergy": 0.1911125767191308,
+                "maximumWorldHeight": 2.3485143184661867,
+                "p99WorldHeight": 1.0620332956314088
+            }
+        },
+        {
+            "mode": "MlsMpm",
+            "status": "passed",
+            "particles": 65536,
+            "grid": 64,
+            "substeps": 12,
+            "ticks": 180,
+            "snapshot": {
+                "particleCount": 65536,
+                "nonFiniteParticles": 0,
+                "outsideParticles": 0,
+                "insideSphereParticles": 0,
+                "gridMass": 65535.871185302734,
+                "center": {
+                    "x": 29.856557846069337,
+                    "y": 7.1476569175720219,
+                    "z": 31.64837074279785
+                },
+                "minimum": {
+                    "x": 2.0,
+                    "y": 2.0,
+                    "z": 2.0
+                },
+                "maximum": {
+                    "x": 61.0,
+                    "y": 34.33540725708008,
+                    "z": 61.0
+                },
+                "maximumSpeed": 4.233108997344971,
+                "peakDensityRatio": 2.32421875,
+                "faults": 0,
+                "simulatedSeconds": 2.9999999999999944,
+                "meanKineticEnergy": 0.400837469449218,
+                "meanAffineKineticEnergy": 0.014154387414283307,
+                "meanPotentialEnergy": 3.4236566080811667,
+                "meanCompressionEnergy": 0.16109535112259108,
+                "maximumWorldHeight": 2.1922309398651125,
+                "p99WorldHeight": 1.3175532817840577
+            }
+        },
+        {
+            "mode": "MlsMpm",
+            "status": "passed",
+            "particles": 131072,
+            "grid": 80,
+            "substeps": 16,
+            "ticks": 180,
+            "snapshot": {
+                "particleCount": 131072,
+                "nonFiniteParticles": 0,
+                "outsideParticles": 0,
+                "insideSphereParticles": 0,
+                "gridMass": 131071.76217651367,
+                "center": {
+                    "x": 36.760414123535159,
+                    "y": 9.027811050415039,
+                    "z": 39.603328704833987
+                },
+                "minimum": {
+                    "x": 2.0,
+                    "y": 2.0,
+                    "z": 2.0
+                },
+                "maximum": {
+                    "x": 77.0,
+                    "y": 44.153663635253909,
+                    "z": 77.0
+                },
+                "maximumSpeed": 3.341872215270996,
+                "peakDensityRatio": 2.2958984375,
+                "faults": 0,
+                "simulatedSeconds": 2.9999999999999944,
+                "meanKineticEnergy": 0.45413094195576955,
+                "meanAffineKineticEnergy": 0.013848375484372332,
+                "meanPotentialEnergy": 3.676964691772861,
+                "meanCompressionEnergy": 0.14419086995345185,
+                "maximumWorldHeight": 2.2481954097747804,
+                "p99WorldHeight": 1.3532153367996216
+            }
+        },
+        {
+            "mode": "MlsMpm",
+            "status": "passed",
+            "particles": 16384,
+            "grid": 32,
+            "substeps": 4,
+            "ticks": 180,
+            "snapshot": {
+                "particleCount": 16384,
+                "nonFiniteParticles": 0,
+                "outsideParticles": 0,
+                "insideSphereParticles": 0,
+                "gridMass": 16383.971923828125,
+                "center": {
+                    "x": 15.015158653259278,
+                    "y": 3.69795823097229,
+                    "z": 15.641995429992676
+                },
+                "minimum": {
+                    "x": 2.0,
+                    "y": 2.0,
+                    "z": 2.0
+                },
+                "maximum": {
+                    "x": 29.0,
+                    "y": 8.430520057678223,
+                    "z": 29.0
+                },
+                "maximumSpeed": 6.0620245933532719,
+                "peakDensityRatio": 2.0869140625,
+                "faults": 0,
+                "simulatedSeconds": 2.9999999999999944,
+                "meanKineticEnergy": 0.5837972648100633,
+                "meanAffineKineticEnergy": 0.058554720753757189,
+                "meanPotentialEnergy": 2.467711057110683,
+                "meanCompressionEnergy": 0.3366468691745576,
+                "maximumWorldHeight": 0.952669620513916,
+                "p99WorldHeight": 0.6514728665351868
+            }
+        },
+        {
+            "mode": "Zibra",
+            "status": "passed",
+            "particles": 32768,
+            "grid": 48,
+            "substeps": 8,
+            "ticks": 12,
+            "snapshot": {
+                "particleCount": 0,
+                "nonFiniteParticles": 0,
+                "outsideParticles": 0,
+                "insideSphereParticles": 0,
+                "gridMass": 0.0,
+                "center": {
+                    "x": 0.0,
+                    "y": 0.0,
+                    "z": 0.0
+                },
+                "minimum": {
+                    "x": 0.0,
+                    "y": 0.0,
+                    "z": 0.0
+                },
+                "maximum": {
+                    "x": 0.0,
+                    "y": 0.0,
+                    "z": 0.0
+                },
+                "maximumSpeed": 0.0,
+                "peakDensityRatio": 0.0,
+                "faults": 0,
+                "simulatedSeconds": 0.0,
+                "meanKineticEnergy": 0.0,
+                "meanAffineKineticEnergy": 0.0,
+                "meanPotentialEnergy": 0.0,
+                "meanCompressionEnergy": 0.0,
+                "maximumWorldHeight": 0.0,
+                "p99WorldHeight": 0.0
+            }
+        },
+        {
+            "mode": "MlsMpm",
+            "status": "passed",
+            "particles": 32768,
+            "grid": 48,
+            "substeps": 8,
+            "ticks": 180,
+            "snapshot": {
+                "particleCount": 32768,
+                "nonFiniteParticles": 0,
+                "outsideParticles": 0,
+                "insideSphereParticles": 0,
+                "gridMass": 32767.94776916504,
+                "center": {
+                    "x": 22.39383316040039,
+                    "y": 5.281857967376709,
+                    "z": 23.845731735229493
+                },
+                "minimum": {
+                    "x": 2.0,
+                    "y": 2.0,
+                    "z": 2.0
+                },
+                "maximum": {
+                    "x": 44.998172760009769,
+                    "y": 27.105628967285158,
+                    "z": 45.0
+                },
+                "maximumSpeed": 8.132062911987305,
+                "peakDensityRatio": 2.083984375,
+                "faults": 0,
+                "simulatedSeconds": 2.9999999999999944,
+                "meanKineticEnergy": 0.47968228634779155,
+                "meanAffineKineticEnergy": 0.023382836519372078,
+                "meanPotentialEnergy": 2.994878942647853,
+                "meanCompressionEnergy": 0.19114031767000096,
+                "maximumWorldHeight": 2.335407257080078,
+                "p99WorldHeight": 1.0633327960968018
+            }
+        },
+        {
+            "mode": "MlsMpm",
+            "status": "passed",
+            "particles": 32768,
+            "grid": 48,
+            "substeps": 8,
+            "ticks": 180,
+            "snapshot": {
+                "particleCount": 32768,
+                "nonFiniteParticles": 0,
+                "outsideParticles": 0,
+                "insideSphereParticles": 0,
+                "gridMass": 32767.939025878906,
+                "center": {
+                    "x": 22.393888473510743,
+                    "y": 5.281102180480957,
+                    "z": 23.845849990844728
+                },
+                "minimum": {
+                    "x": 2.0,
+                    "y": 2.0,
+                    "z": 2.0
+                },
+                "maximum": {
+                    "x": 44.99815368652344,
+                    "y": 27.643152236938478,
+                    "z": 45.0
+                },
+                "maximumSpeed": 8.456512451171875,
+                "peakDensityRatio": 2.083984375,
+                "faults": 0,
+                "simulatedSeconds": 2.9999999999999944,
+                "meanKineticEnergy": 0.4804618227618039,
+                "meanAffineKineticEnergy": 0.02339601132696446,
+                "meanPotentialEnergy": 2.994176639031602,
+                "meanCompressionEnergy": 0.19114595456669856,
+                "maximumWorldHeight": 2.3854095935821535,
+                "p99WorldHeight": 1.064998984336853
+            }
+        }
+    ]
+}

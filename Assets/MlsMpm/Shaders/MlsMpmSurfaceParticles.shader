@@ -28,6 +28,7 @@ Shader "Hidden/WaterSplash/Surface Particles"
         TEXTURE2D(_FluidDepth);
         float _WhitewaterRadius;
         float _WhitewaterDepthTolerance;
+        float _ContinuousFoam;
 
         struct ParticleVaryings
         {
@@ -103,15 +104,29 @@ Shader "Hidden/WaterSplash/Surface Particles"
             output.positionCS = float4(0, 0, 2, 1);
             if (p.position.w <= 0) return output;
             float random = WhitewaterRandom(id);
-            float radius = _WhitewaterRadius * (p.normalType.w > 0.5 ?
-                lerp(1.4, 2.8, random) : lerp(0.25, 0.6, random));
+            bool foam = p.normalType.w > 0.5;
+            float radius = _WhitewaterRadius * (foam ?
+                lerp(lerp(1.4, 2.8, random), lerp(2.8, 4.3, random), _ContinuousFoam) : lerp(0.25, 0.6, random));
             output.centerVS = TransformWorldToView(_Origin + _CellSize * p.position.xyz);
             output.disk = corners[vertex];
             output.radiusFade = float2(radius, saturate((p.velocity.w - p.position.w) / 0.1) *
                 saturate(p.position.w / 0.5));
             if (-output.centerVS.z < _ProjectionParams.y + radius) return output;
-            output.positionCS = mul(UNITY_MATRIX_P,
-                float4(output.centerVS + float3(output.disk * radius, 0), 1));
+            float3 billboard = float3(output.disk * radius, 0);
+            if (foam && _ContinuousFoam > 0.5)
+            {
+                // Surface-oriented elliptical footprints overlap into a density field.
+                // A grazing-angle floor prevents subpixel flicker on steep waves.
+                float3 n = normalize(p.normalType.xyz + float3(0, 1e-5, 0));
+                float3 flow = p.velocity.xyz - n * dot(n, p.velocity.xyz);
+                float3 tangent = dot(flow, flow) > 0.01 ? normalize(flow) :
+                    normalize(cross(n, abs(n.y) < .9 ? float3(0,1,0) : float3(1,0,0)));
+                float3 bitangent = cross(n, tangent);
+                float3 surfaceOffset = mul((float3x3)UNITY_MATRIX_V,
+                    radius * (output.disk.x * tangent * 1.65 + output.disk.y * bitangent * .85));
+                billboard = lerp(billboard * .7, surfaceOffset, .85);
+            }
+            output.positionCS = mul(UNITY_MATRIX_P, float4(output.centerVS + billboard, 1));
             return output;
         }
 
@@ -126,7 +141,8 @@ Shader "Hidden/WaterSplash/Surface Particles"
             clip(depthFade - 1e-4);
             clip(SceneEyeDepth(uv) + input.centerVS.z + input.radiusFade.x);
             float falloff = saturate(1.0 - r2);
-            return input.radiusFade.y * depthFade * falloff * falloff * 0.55;
+            float kernel = lerp(falloff * falloff * .55, exp(-3.5 * r2) * .42, _ContinuousFoam);
+            return input.radiusFade.y * depthFade * kernel;
         }
 
         struct SprayOutput

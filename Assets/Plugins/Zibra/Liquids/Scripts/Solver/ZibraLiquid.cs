@@ -32,6 +32,9 @@ namespace com.zibra.liquid.Solver
     // Encase this check and "using UnityEditor" in "#if UNITY_EDITOR" preprocessor directive to prevent build errors
     public class ZibraLiquid : MonoBehaviour
     {
+        // Timestamp boundaries only: native solver internals remain opaque.
+        static readonly UnityEngine.Profiling.CustomSampler clearSdfTiming = UnityEngine.Profiling.CustomSampler.Create("Zibra GPU/Clear SDF", true);
+        static readonly UnityEngine.Profiling.CustomSampler nativeStepTiming = UnityEngine.Profiling.CustomSampler.Create("Zibra GPU/Native solver", true);
         /// <summary>
         /// A list of all instances of the ZibraFluid solver
         /// </summary>
@@ -1684,10 +1687,12 @@ namespace com.zibra.liquid.Solver
         private void StepPhysics()
         {
             solverCommandBuffer.Clear();
+            solverCommandBuffer.BeginSample(clearSdfTiming);
 
             solverCommandBuffer.IssuePluginEvent(
                 ZibraLiquidBridge.GetRenderEventFunc(),
                 ZibraLiquidBridge.EventAndInstanceID(ZibraLiquidBridge.EventID.ClearSDFAndID, CurrentInstanceID));
+            solverCommandBuffer.EndSample(clearSdfTiming);
 
             SetFluidParameters();
 
@@ -1722,9 +1727,11 @@ namespace com.zibra.liquid.Solver
             }
 
             // execute simulation
+            solverCommandBuffer.BeginSample(nativeStepTiming);
             solverCommandBuffer.IssuePluginEvent(
                 ZibraLiquidBridge.GetRenderEventFunc(),
                 ZibraLiquidBridge.EventAndInstanceID(ZibraLiquidBridge.EventID.StepPhysics, CurrentInstanceID));
+            solverCommandBuffer.EndSample(nativeStepTiming);
 
             Graphics.ExecuteCommandBuffer(solverCommandBuffer);
 

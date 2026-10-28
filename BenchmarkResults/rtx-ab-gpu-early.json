@@ -1,0 +1,1278 @@
+{
+    "gpu": "NVIDIA GeForce RTX 5070 Ti Laptop GPU",
+    "api": "Direct3D11",
+    "utc": "2026-10-27T13:35:24.5003987Z",
+    "status": "complete",
+    "particles": 32768,
+    "mpmGrid": 48,
+    "zibraGrid": 43,
+    "width": 1280,
+    "height": 720,
+    "note": "Editor D3D11 GPU timestamps; one requested 1/60s tick/render frame. 24 warmup frames, 180 capture frames. msPerBlock counts actual dispatches; MPM solver sum times substeps, Zibra native sum times iterations. Native internals opaque. Foam is particle whitewater vs native density whitening. Diagnostic readbacks and PNG captures occur outside timing window.",
+    "cases": [
+        {
+            "name": "Zibra-1-base",
+            "status": "captured",
+            "zibra": true,
+            "foam": false,
+            "rendering": true,
+            "steps": 1,
+            "frames": 180,
+            "particles": 32768,
+            "grid": 48,
+            "stir": false,
+            "damping": 0.0,
+            "solverMsPerTick": 0.201792,
+            "renderMsPerFrame": 0.194624,
+            "stages": [
+                {
+                    "name": "MLS-MPM GPU/Clear",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "MLS-MPM GPU/Mass + momentum",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "MLS-MPM GPU/Stress",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "MLS-MPM GPU/Grid velocity",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "MLS-MPM GPU/G2P + advection",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "MLS-MPM GPU/Whitewater",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "MPM Render/Depth",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "MPM Render/Thickness",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "MPM Render/Smoothing",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "MPM Render/Normals",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "MPM Render/Foam",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "MPM Render/Shading",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "MPM Render/Spray",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "Zibra GPU/Clear SDF",
+                    "frames": 4,
+                    "blocks": 4,
+                    "totalMs": 0.09395200000000001,
+                    "msPerBlock": 0.023488000000000003
+                },
+                {
+                    "name": "Zibra GPU/Native solver",
+                    "frames": 4,
+                    "blocks": 4,
+                    "totalMs": 0.713216,
+                    "msPerBlock": 0.178304
+                },
+                {
+                    "name": "Zibra GPU/Background copy",
+                    "frames": 4,
+                    "blocks": 4,
+                    "totalMs": 0.024832,
+                    "msPerBlock": 0.006208
+                },
+                {
+                    "name": "Zibra GPU/Native surface",
+                    "frames": 4,
+                    "blocks": 4,
+                    "totalMs": 0.687872,
+                    "msPerBlock": 0.171968
+                },
+                {
+                    "name": "Zibra GPU/Shading",
+                    "frames": 4,
+                    "blocks": 4,
+                    "totalMs": 0.065792,
+                    "msPerBlock": 0.016448
+                },
+                {
+                    "name": "Zibra GPU/Upscale",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                }
+            ],
+            "heights": [
+                {
+                    "seconds": 3.4166666666666667,
+                    "maximum": 1.507541537284851,
+                    "p99": 1.0302561521530152,
+                    "mean": 0.4264603853225708
+                }
+            ]
+        },
+        {
+            "name": "MPM-4-base",
+            "status": "captured",
+            "zibra": false,
+            "foam": false,
+            "rendering": true,
+            "steps": 4,
+            "frames": 180,
+            "particles": 32768,
+            "grid": 48,
+            "stir": false,
+            "damping": 0.0,
+            "solverMsPerTick": 0.9720320000000001,
+            "renderMsPerFrame": 0.342784,
+            "stages": [
+                {
+                    "name": "MLS-MPM GPU/Clear",
+                    "frames": 2,
+                    "blocks": 8,
+                    "totalMs": 0.067584,
+                    "msPerBlock": 0.008448
+                },
+                {
+                    "name": "MLS-MPM GPU/Mass + momentum",
+                    "frames": 2,
+                    "blocks": 8,
+                    "totalMs": 0.9612799999999999,
+                    "msPerBlock": 0.12015999999999999
+                },
+                {
+                    "name": "MLS-MPM GPU/Stress",
+                    "frames": 2,
+                    "blocks": 8,
+                    "totalMs": 0.7667200000000001,
+                    "msPerBlock": 0.09584000000000001
+                },
+                {
+                    "name": "MLS-MPM GPU/Grid velocity",
+                    "frames": 2,
+                    "blocks": 8,
+                    "totalMs": 0.032512,
+                    "msPerBlock": 0.004064
+                },
+                {
+                    "name": "MLS-MPM GPU/G2P + advection",
+                    "frames": 2,
+                    "blocks": 8,
+                    "totalMs": 0.115968,
+                    "msPerBlock": 0.014496
+                },
+                {
+                    "name": "MLS-MPM GPU/Whitewater",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "MPM Render/Depth",
+                    "frames": 2,
+                    "blocks": 2,
+                    "totalMs": 0.293632,
+                    "msPerBlock": 0.146816
+                },
+                {
+                    "name": "MPM Render/Thickness",
+                    "frames": 2,
+                    "blocks": 2,
+                    "totalMs": 0.10752,
+                    "msPerBlock": 0.05376
+                },
+                {
+                    "name": "MPM Render/Smoothing",
+                    "frames": 2,
+                    "blocks": 2,
+                    "totalMs": 0.23910399999999999,
+                    "msPerBlock": 0.11955199999999999
+                },
+                {
+                    "name": "MPM Render/Normals",
+                    "frames": 2,
+                    "blocks": 2,
+                    "totalMs": 0.012032000000000001,
+                    "msPerBlock": 0.0060160000000000009
+                },
+                {
+                    "name": "MPM Render/Foam",
+                    "frames": 1,
+                    "blocks": 1,
+                    "totalMs": 0.000256,
+                    "msPerBlock": 0.000256
+                },
+                {
+                    "name": "MPM Render/Shading",
+                    "frames": 2,
+                    "blocks": 2,
+                    "totalMs": 0.032768,
+                    "msPerBlock": 0.016384
+                },
+                {
+                    "name": "MPM Render/Spray",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "Zibra GPU/Clear SDF",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "Zibra GPU/Native solver",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "Zibra GPU/Background copy",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "Zibra GPU/Native surface",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "Zibra GPU/Shading",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "Zibra GPU/Upscale",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                }
+            ],
+            "heights": [
+                {
+                    "seconds": 3.4166666666666596,
+                    "maximum": 2.843315601348877,
+                    "p99": 0.9402600526809692,
+                    "mean": 0.0
+                }
+            ]
+        },
+        {
+            "name": "MPM-8-base",
+            "status": "captured",
+            "zibra": false,
+            "foam": false,
+            "rendering": true,
+            "steps": 8,
+            "frames": 180,
+            "particles": 32768,
+            "grid": 48,
+            "stir": false,
+            "damping": 0.0,
+            "solverMsPerTick": 2.222421333333333,
+            "renderMsPerFrame": 0.3913386666666666,
+            "stages": [
+                {
+                    "name": "MLS-MPM GPU/Clear",
+                    "frames": 6,
+                    "blocks": 48,
+                    "totalMs": 0.36224,
+                    "msPerBlock": 0.007546666666666667
+                },
+                {
+                    "name": "MLS-MPM GPU/Mass + momentum",
+                    "frames": 6,
+                    "blocks": 48,
+                    "totalMs": 6.6859519999999998,
+                    "msPerBlock": 0.13929066666666665
+                },
+                {
+                    "name": "MLS-MPM GPU/Stress",
+                    "frames": 6,
+                    "blocks": 48,
+                    "totalMs": 5.317888,
+                    "msPerBlock": 0.11078933333333334
+                },
+                {
+                    "name": "MLS-MPM GPU/Grid velocity",
+                    "frames": 6,
+                    "blocks": 48,
+                    "totalMs": 0.19225599999999999,
+                    "msPerBlock": 0.004005333333333333
+                },
+                {
+                    "name": "MLS-MPM GPU/G2P + advection",
+                    "frames": 6,
+                    "blocks": 48,
+                    "totalMs": 0.776192,
+                    "msPerBlock": 0.016170666666666668
+                },
+                {
+                    "name": "MLS-MPM GPU/Whitewater",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "MPM Render/Depth",
+                    "frames": 6,
+                    "blocks": 6,
+                    "totalMs": 0.97024,
+                    "msPerBlock": 0.16170666666666667
+                },
+                {
+                    "name": "MPM Render/Thickness",
+                    "frames": 6,
+                    "blocks": 6,
+                    "totalMs": 0.328192,
+                    "msPerBlock": 0.054698666666666669
+                },
+                {
+                    "name": "MPM Render/Smoothing",
+                    "frames": 6,
+                    "blocks": 6,
+                    "totalMs": 0.8808959999999998,
+                    "msPerBlock": 0.14681599999999998
+                },
+                {
+                    "name": "MPM Render/Normals",
+                    "frames": 6,
+                    "blocks": 6,
+                    "totalMs": 0.041728,
+                    "msPerBlock": 0.006954666666666667
+                },
+                {
+                    "name": "MPM Render/Foam",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "MPM Render/Shading",
+                    "frames": 6,
+                    "blocks": 6,
+                    "totalMs": 0.126976,
+                    "msPerBlock": 0.021162666666666668
+                },
+                {
+                    "name": "MPM Render/Spray",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "Zibra GPU/Clear SDF",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "Zibra GPU/Native solver",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "Zibra GPU/Background copy",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "Zibra GPU/Native surface",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "Zibra GPU/Shading",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "Zibra GPU/Upscale",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                }
+            ],
+            "heights": [
+                {
+                    "seconds": 3.4166666666666596,
+                    "maximum": 3.1547224521636965,
+                    "p99": 1.0373334884643555,
+                    "mean": 0.0
+                }
+            ]
+        },
+        {
+            "name": "Zibra-1-foam",
+            "status": "captured",
+            "zibra": true,
+            "foam": true,
+            "rendering": true,
+            "steps": 1,
+            "frames": 180,
+            "particles": 32768,
+            "grid": 48,
+            "stir": false,
+            "damping": 0.0,
+            "solverMsPerTick": 0.19131733333333338,
+            "renderMsPerFrame": 0.18568533333333335,
+            "stages": [
+                {
+                    "name": "MLS-MPM GPU/Clear",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "MLS-MPM GPU/Mass + momentum",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "MLS-MPM GPU/Stress",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "MLS-MPM GPU/Grid velocity",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "MLS-MPM GPU/G2P + advection",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "MLS-MPM GPU/Whitewater",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "MPM Render/Depth",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "MPM Render/Thickness",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "MPM Render/Smoothing",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "MPM Render/Normals",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "MPM Render/Foam",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "MPM Render/Shading",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "MPM Render/Spray",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "Zibra GPU/Clear SDF",
+                    "frames": 3,
+                    "blocks": 3,
+                    "totalMs": 0.06144,
+                    "msPerBlock": 0.02048
+                },
+                {
+                    "name": "Zibra GPU/Native solver",
+                    "frames": 3,
+                    "blocks": 3,
+                    "totalMs": 0.5125120000000001,
+                    "msPerBlock": 0.17083733333333338
+                },
+                {
+                    "name": "Zibra GPU/Background copy",
+                    "frames": 3,
+                    "blocks": 3,
+                    "totalMs": 0.019456,
+                    "msPerBlock": 0.006485333333333333
+                },
+                {
+                    "name": "Zibra GPU/Native surface",
+                    "frames": 3,
+                    "blocks": 3,
+                    "totalMs": 0.491776,
+                    "msPerBlock": 0.16392533333333335
+                },
+                {
+                    "name": "Zibra GPU/Shading",
+                    "frames": 3,
+                    "blocks": 3,
+                    "totalMs": 0.045824000000000007,
+                    "msPerBlock": 0.015274666666666668
+                },
+                {
+                    "name": "Zibra GPU/Upscale",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                }
+            ],
+            "heights": [
+                {
+                    "seconds": 3.4166666666666667,
+                    "maximum": 1.507541537284851,
+                    "p99": 1.0302561521530152,
+                    "mean": 0.4264603853225708
+                }
+            ]
+        },
+        {
+            "name": "MPM-4-foam",
+            "status": "captured",
+            "zibra": false,
+            "foam": true,
+            "rendering": true,
+            "steps": 4,
+            "frames": 180,
+            "particles": 32768,
+            "grid": 48,
+            "stir": false,
+            "damping": 0.0,
+            "solverMsPerTick": 1.0629485714285714,
+            "renderMsPerFrame": 0.43366400000000007,
+            "stages": [
+                {
+                    "name": "MLS-MPM GPU/Clear",
+                    "frames": 7,
+                    "blocks": 28,
+                    "totalMs": 0.267008,
+                    "msPerBlock": 0.009536000000000001
+                },
+                {
+                    "name": "MLS-MPM GPU/Mass + momentum",
+                    "frames": 7,
+                    "blocks": 28,
+                    "totalMs": 3.6014079999999999,
+                    "msPerBlock": 0.12862171428571429
+                },
+                {
+                    "name": "MLS-MPM GPU/Stress",
+                    "frames": 7,
+                    "blocks": 28,
+                    "totalMs": 2.8282880000000008,
+                    "msPerBlock": 0.10101028571428573
+                },
+                {
+                    "name": "MLS-MPM GPU/Grid velocity",
+                    "frames": 7,
+                    "blocks": 28,
+                    "totalMs": 0.118784,
+                    "msPerBlock": 0.004242285714285714
+                },
+                {
+                    "name": "MLS-MPM GPU/G2P + advection",
+                    "frames": 7,
+                    "blocks": 28,
+                    "totalMs": 0.4288,
+                    "msPerBlock": 0.015314285714285715
+                },
+                {
+                    "name": "MLS-MPM GPU/Whitewater",
+                    "frames": 7,
+                    "blocks": 7,
+                    "totalMs": 0.196352,
+                    "msPerBlock": 0.028050285714285716
+                },
+                {
+                    "name": "MPM Render/Depth",
+                    "frames": 7,
+                    "blocks": 7,
+                    "totalMs": 1.146624,
+                    "msPerBlock": 0.16380342857142858
+                },
+                {
+                    "name": "MPM Render/Thickness",
+                    "frames": 7,
+                    "blocks": 7,
+                    "totalMs": 0.395264,
+                    "msPerBlock": 0.05646628571428571
+                },
+                {
+                    "name": "MPM Render/Smoothing",
+                    "frames": 7,
+                    "blocks": 7,
+                    "totalMs": 1.11616,
+                    "msPerBlock": 0.15945142857142859
+                },
+                {
+                    "name": "MPM Render/Normals",
+                    "frames": 7,
+                    "blocks": 7,
+                    "totalMs": 0.050176000000000008,
+                    "msPerBlock": 0.007168000000000001
+                },
+                {
+                    "name": "MPM Render/Foam",
+                    "frames": 7,
+                    "blocks": 7,
+                    "totalMs": 0.1536,
+                    "msPerBlock": 0.021942857142857144
+                },
+                {
+                    "name": "MPM Render/Shading",
+                    "frames": 7,
+                    "blocks": 7,
+                    "totalMs": 0.15616000000000003,
+                    "msPerBlock": 0.02230857142857143
+                },
+                {
+                    "name": "MPM Render/Spray",
+                    "frames": 7,
+                    "blocks": 7,
+                    "totalMs": 0.017664,
+                    "msPerBlock": 0.0025234285714285716
+                },
+                {
+                    "name": "Zibra GPU/Clear SDF",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "Zibra GPU/Native solver",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "Zibra GPU/Background copy",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "Zibra GPU/Native surface",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "Zibra GPU/Shading",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "Zibra GPU/Upscale",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                }
+            ],
+            "heights": [
+                {
+                    "seconds": 3.4166666666666596,
+                    "maximum": 2.8693389892578127,
+                    "p99": 0.9406055808067322,
+                    "mean": 0.0
+                }
+            ]
+        },
+        {
+            "name": "Zibra-2-base",
+            "status": "GPU timestamps unavailable",
+            "zibra": true,
+            "foam": false,
+            "rendering": true,
+            "steps": 2,
+            "frames": 180,
+            "particles": 32768,
+            "grid": 48,
+            "stir": false,
+            "damping": 0.0,
+            "solverMsPerTick": 0.0,
+            "renderMsPerFrame": 0.0,
+            "stages": [
+                {
+                    "name": "MLS-MPM GPU/Clear",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "MLS-MPM GPU/Mass + momentum",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "MLS-MPM GPU/Stress",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "MLS-MPM GPU/Grid velocity",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "MLS-MPM GPU/G2P + advection",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "MLS-MPM GPU/Whitewater",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "MPM Render/Depth",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "MPM Render/Thickness",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "MPM Render/Smoothing",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "MPM Render/Normals",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "MPM Render/Foam",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "MPM Render/Shading",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "MPM Render/Spray",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "Zibra GPU/Clear SDF",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "Zibra GPU/Native solver",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "Zibra GPU/Background copy",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "Zibra GPU/Native surface",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "Zibra GPU/Shading",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "Zibra GPU/Upscale",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                }
+            ],
+            "heights": [
+                {
+                    "seconds": 3.4166666666666667,
+                    "maximum": 1.2609848976135255,
+                    "p99": 0.9494893550872803,
+                    "mean": 0.419916570186615
+                }
+            ]
+        },
+        {
+            "name": "MPM-8-foam",
+            "status": "captured",
+            "zibra": false,
+            "foam": true,
+            "rendering": true,
+            "steps": 8,
+            "frames": 180,
+            "particles": 32768,
+            "grid": 48,
+            "stir": false,
+            "damping": 0.0,
+            "solverMsPerTick": 2.0861696000000005,
+            "renderMsPerFrame": 0.4384,
+            "stages": [
+                {
+                    "name": "MLS-MPM GPU/Clear",
+                    "frames": 11,
+                    "blocks": 88,
+                    "totalMs": 0.638208,
+                    "msPerBlock": 0.007252363636363637
+                },
+                {
+                    "name": "MLS-MPM GPU/Mass + momentum",
+                    "frames": 11,
+                    "blocks": 88,
+                    "totalMs": 11.305472000000002,
+                    "msPerBlock": 0.12847127272727275
+                },
+                {
+                    "name": "MLS-MPM GPU/Stress",
+                    "frames": 11,
+                    "blocks": 88,
+                    "totalMs": 8.919296,
+                    "msPerBlock": 0.10135563636363636
+                },
+                {
+                    "name": "MLS-MPM GPU/Grid velocity",
+                    "frames": 11,
+                    "blocks": 88,
+                    "totalMs": 0.348672,
+                    "msPerBlock": 0.003962181818181818
+                },
+                {
+                    "name": "MLS-MPM GPU/G2P + advection",
+                    "frames": 11,
+                    "blocks": 88,
+                    "totalMs": 1.333248,
+                    "msPerBlock": 0.015150545454545455
+                },
+                {
+                    "name": "MLS-MPM GPU/Whitewater",
+                    "frames": 10,
+                    "blocks": 10,
+                    "totalMs": 0.366336,
+                    "msPerBlock": 0.0366336
+                },
+                {
+                    "name": "MPM Render/Depth",
+                    "frames": 10,
+                    "blocks": 10,
+                    "totalMs": 1.6529919999999999,
+                    "msPerBlock": 0.16529919999999999
+                },
+                {
+                    "name": "MPM Render/Thickness",
+                    "frames": 10,
+                    "blocks": 10,
+                    "totalMs": 0.573184,
+                    "msPerBlock": 0.057318400000000008
+                },
+                {
+                    "name": "MPM Render/Smoothing",
+                    "frames": 10,
+                    "blocks": 10,
+                    "totalMs": 1.5697920000000004,
+                    "msPerBlock": 0.15697920000000005
+                },
+                {
+                    "name": "MPM Render/Normals",
+                    "frames": 10,
+                    "blocks": 10,
+                    "totalMs": 0.0704,
+                    "msPerBlock": 0.00704
+                },
+                {
+                    "name": "MPM Render/Foam",
+                    "frames": 10,
+                    "blocks": 10,
+                    "totalMs": 0.26368,
+                    "msPerBlock": 0.026368000000000004
+                },
+                {
+                    "name": "MPM Render/Shading",
+                    "frames": 10,
+                    "blocks": 10,
+                    "totalMs": 0.22528,
+                    "msPerBlock": 0.022528
+                },
+                {
+                    "name": "MPM Render/Spray",
+                    "frames": 10,
+                    "blocks": 10,
+                    "totalMs": 0.028672,
+                    "msPerBlock": 0.0028672
+                },
+                {
+                    "name": "Zibra GPU/Clear SDF",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "Zibra GPU/Native solver",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "Zibra GPU/Background copy",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "Zibra GPU/Native surface",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "Zibra GPU/Shading",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "Zibra GPU/Upscale",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                }
+            ],
+            "heights": [
+                {
+                    "seconds": 3.4166666666666596,
+                    "maximum": 3.205935478210449,
+                    "p99": 1.0398075580596924,
+                    "mean": 0.0
+                }
+            ]
+        },
+        {
+            "name": "MPM-128K-8-foam",
+            "status": "captured",
+            "zibra": false,
+            "foam": true,
+            "rendering": true,
+            "steps": 8,
+            "frames": 180,
+            "particles": 131072,
+            "grid": 80,
+            "stir": false,
+            "damping": 0.0,
+            "solverMsPerTick": 8.059516289855072,
+            "renderMsPerFrame": 0.706001623188406,
+            "stages": [
+                {
+                    "name": "MLS-MPM GPU/Clear",
+                    "frames": 138,
+                    "blocks": 1104,
+                    "totalMs": 18.835456000000009,
+                    "msPerBlock": 0.01706110144927537
+                },
+                {
+                    "name": "MLS-MPM GPU/Mass + momentum",
+                    "frames": 138,
+                    "blocks": 1104,
+                    "totalMs": 536.0110080000001,
+                    "msPerBlock": 0.4855172173913044
+                },
+                {
+                    "name": "MLS-MPM GPU/Stress",
+                    "frames": 138,
+                    "blocks": 1104,
+                    "totalMs": 465.0705919999999,
+                    "msPerBlock": 0.4212595942028985
+                },
+                {
+                    "name": "MLS-MPM GPU/Grid velocity",
+                    "frames": 138,
+                    "blocks": 1104,
+                    "totalMs": 8.327168000000006,
+                    "msPerBlock": 0.007542724637681165
+                },
+                {
+                    "name": "MLS-MPM GPU/G2P + advection",
+                    "frames": 138,
+                    "blocks": 1104,
+                    "totalMs": 80.46771199999994,
+                    "msPerBlock": 0.07288742028985501
+                },
+                {
+                    "name": "MLS-MPM GPU/Whitewater",
+                    "frames": 138,
+                    "blocks": 138,
+                    "totalMs": 3.501312,
+                    "msPerBlock": 0.025371826086956523
+                },
+                {
+                    "name": "MPM Render/Depth",
+                    "frames": 138,
+                    "blocks": 138,
+                    "totalMs": 48.74265600000002,
+                    "msPerBlock": 0.3532076521739132
+                },
+                {
+                    "name": "MPM Render/Thickness",
+                    "frames": 138,
+                    "blocks": 138,
+                    "totalMs": 19.042559999999996,
+                    "msPerBlock": 0.13798956521739126
+                },
+                {
+                    "name": "MPM Render/Smoothing",
+                    "frames": 138,
+                    "blocks": 138,
+                    "totalMs": 23.209984000000007,
+                    "msPerBlock": 0.1681882898550725
+                },
+                {
+                    "name": "MPM Render/Normals",
+                    "frames": 138,
+                    "blocks": 138,
+                    "totalMs": 1.1041279999999998,
+                    "msPerBlock": 0.008000927536231884
+                },
+                {
+                    "name": "MPM Render/Foam",
+                    "frames": 138,
+                    "blocks": 138,
+                    "totalMs": 1.7469439999999999,
+                    "msPerBlock": 0.012659014492753623
+                },
+                {
+                    "name": "MPM Render/Shading",
+                    "frames": 138,
+                    "blocks": 138,
+                    "totalMs": 3.2586240000000008,
+                    "msPerBlock": 0.023613217391304354
+                },
+                {
+                    "name": "MPM Render/Spray",
+                    "frames": 138,
+                    "blocks": 138,
+                    "totalMs": 0.32332799999999997,
+                    "msPerBlock": 0.00234295652173913
+                },
+                {
+                    "name": "Zibra GPU/Clear SDF",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "Zibra GPU/Native solver",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "Zibra GPU/Background copy",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "Zibra GPU/Native surface",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "Zibra GPU/Shading",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                },
+                {
+                    "name": "Zibra GPU/Upscale",
+                    "frames": 0,
+                    "blocks": 0,
+                    "totalMs": 0.0,
+                    "msPerBlock": 0.0
+                }
+            ],
+            "heights": [
+                {
+                    "seconds": 3.4166666666666596,
+                    "maximum": 2.2671058177948,
+                    "p99": 0.9828203320503235,
+                    "mean": 0.0
+                }
+            ]
+        }
+    ]
+}

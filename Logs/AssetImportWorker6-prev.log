@@ -1,0 +1,492 @@
+Using pre-set license
+Built from '2022.3/respin/2022.3.62f2-4af31df585-v2' branch; Version is '2022.3.62f3 (96770f904ca7) revision 9860879'; Using compiler version '192829333'; Build Type 'Release'
+OS: 'Windows 11  (10.0.26200) 64bit Professional' Language: 'en' Physical Memory: 32487 MB
+BatchMode: 1, IsHumanControllingUs: 0, StartBugReporterOnCrash: 0, Is64bit: 1, IsPro: 1
+
+COMMAND LINE ARGUMENTS:
+D:\Unity\2022.3.62f3\Editor\Unity.exe
+-adb2
+-batchMode
+-noUpm
+-name
+AssetImportWorker6
+-projectPath
+E:/Projects/Unity Projects/Water-Splash
+-logFile
+Logs/AssetImportWorker6.log
+-srvPort
+60076
+Successfully changed project path to: E:/Projects/Unity Projects/Water-Splash
+E:/Projects/Unity Projects/Water-Splash
+[UnityMemory] Configuration Parameters - Can be set up in boot.config
+    "memorysetup-bucket-allocator-granularity=16"
+    "memorysetup-bucket-allocator-bucket-count=8"
+    "memorysetup-bucket-allocator-block-size=33554432"
+    "memorysetup-bucket-allocator-block-count=8"
+    "memorysetup-main-allocator-block-size=16777216"
+    "memorysetup-thread-allocator-block-size=16777216"
+    "memorysetup-gfx-main-allocator-block-size=16777216"
+    "memorysetup-gfx-thread-allocator-block-size=16777216"
+    "memorysetup-cache-allocator-block-size=4194304"
+    "memorysetup-typetree-allocator-block-size=2097152"
+    "memorysetup-profiler-bucket-allocator-granularity=16"
+    "memorysetup-profiler-bucket-allocator-bucket-count=8"
+    "memorysetup-profiler-bucket-allocator-block-size=33554432"
+    "memorysetup-profiler-bucket-allocator-block-count=8"
+    "memorysetup-profiler-allocator-block-size=16777216"
+    "memorysetup-profiler-editor-allocator-block-size=1048576"
+    "memorysetup-temp-allocator-size-main=16777216"
+    "memorysetup-job-temp-allocator-block-size=2097152"
+    "memorysetup-job-temp-allocator-block-size-background=1048576"
+    "memorysetup-job-temp-allocator-reduction-small-platforms=262144"
+    "memorysetup-allocator-temp-initial-block-size-main=262144"
+    "memorysetup-allocator-temp-initial-block-size-worker=262144"
+    "memorysetup-temp-allocator-size-background-worker=32768"
+    "memorysetup-temp-allocator-size-job-worker=262144"
+    "memorysetup-temp-allocator-size-preload-manager=33554432"
+    "memorysetup-temp-allocator-size-nav-mesh-worker=65536"
+    "memorysetup-temp-allocator-size-audio-worker=65536"
+    "memorysetup-temp-allocator-size-cloud-worker=32768"
+    "memorysetup-temp-allocator-size-gi-baking-worker=262144"
+    "memorysetup-temp-allocator-size-gfx=262144"
+Player connection [35064]  Target information:
+
+Player connection [35064]  * "[IP] 198.18.0.1 [Port] 0 [Flags] 2 [Guid] 767878329 [EditorId] 767878329 [Version] 1048832 [Id] WindowsEditor(7,DESKTOP-O560U5M) [Debug] 1 [PackageName] WindowsEditor [ProjectName] Editor" 
+
+Player connection [35064]  * "[IP] 192.168.1.3 [Port] 0 [Flags] 2 [Guid] 767878329 [EditorId] 767878329 [Version] 1048832 [Id] WindowsEditor(7,DESKTOP-O560U5M) [Debug] 1 [PackageName] WindowsEditor [ProjectName] Editor" 
+
+Player connection [35064] Host joined multi-casting on [225.0.0.222:54997]...
+Player connection [35064] Host joined alternative multi-casting on [225.0.0.222:34997]...
+Input System module state changed to: Initialized.
+[PhysX] Initialized MultithreadedTaskDispatcher with 32 workers.
+Refreshing native plugins compatible for Editor in 34.31 ms, found 5 plugins.
+Preloading 0 native plugins for Editor in 0.00 ms.
+Initialize engine version: 2022.3.62f3 (96770f904ca7)
+[Subsystems] Discovering subsystems at path D:/Unity/2022.3.62f3/Editor/Data/Resources/UnitySubsystems
+[Subsystems] Discovering subsystems at path E:/Projects/Unity Projects/Water-Splash/Assets
+GfxDevice: creating device client; threaded=0; jobified=0
+Direct3D:
+    Version:  Direct3D 11.0 [level 11.1]
+    Renderer: NVIDIA GeForce RTX 5070 Ti Laptop GPU (ID=0x2f18)
+    Vendor:   NVIDIA
+    VRAM:     11944 MB
+    Driver:   32.0.16.1742
+Initialize mono
+Mono path[0] = 'D:/Unity/2022.3.62f3/Editor/Data/Managed'
+Mono path[1] = 'D:/Unity/2022.3.62f3/Editor/Data/MonoBleedingEdge/lib/mono/unityjit-win32'
+Mono config path = 'D:/Unity/2022.3.62f3/Editor/Data/MonoBleedingEdge/etc'
+Using monoOptions --debugger-agent=transport=dt_socket,embedding=1,server=y,suspend=n,address=127.0.0.1:56796
+Begin MonoManager ReloadAssembly
+Registering precompiled unity dll's ...
+Register platform support module: D:/Unity/2022.3.62f3/Editor/Data/PlaybackEngines/WebGLSupport/UnityEditor.WebGL.Extensions.dll
+Register platform support module: D:/Unity/2022.3.62f3/Editor/Data/PlaybackEngines/AndroidPlayer/UnityEditor.Android.Extensions.dll
+Register platform support module: D:/Unity/2022.3.62f3/Editor/Data/PlaybackEngines/WindowsStandaloneSupport/UnityEditor.WindowsStandalone.Extensions.dll
+Registered in 0.014300 seconds.
+- Loaded All Assemblies, in  0.337 seconds
+Native extension for WindowsStandalone target not found
+Native extension for Android target not found
+Android Extension - Scanning For ADB Devices 453 ms
+Native extension for WebGL target not found
+Mono: successfully reloaded assembly
+- Finished resetting the current domain, in  0.726 seconds
+Domain Reload Profiling: 1061ms
+	BeginReloadAssembly (112ms)
+		ExecutionOrderSort (0ms)
+		DisableScriptedObjects (0ms)
+		BackupInstance (0ms)
+		ReleaseScriptingObjects (0ms)
+		CreateAndSetChildDomain (1ms)
+	RebuildCommonClasses (35ms)
+	RebuildNativeTypeToScriptingClass (11ms)
+	initialDomainReloadingComplete (54ms)
+	LoadAllAssembliesAndSetupDomain (123ms)
+		LoadAssemblies (108ms)
+		RebuildTransferFunctionScriptingTraits (0ms)
+		AnalyzeDomain (121ms)
+			TypeCache.Refresh (119ms)
+				TypeCache.ScanAssembly (107ms)
+			ScanForSourceGeneratedMonoScriptInfo (0ms)
+			ResolveRequiredComponents (0ms)
+	FinalizeReload (727ms)
+		ReleaseScriptCaches (0ms)
+		RebuildScriptCaches (0ms)
+		SetupLoadedEditorAssemblies (684ms)
+			LogAssemblyErrors (0ms)
+			InitializePlatformSupportModulesInManaged (524ms)
+			SetLoadedEditorAssemblies (4ms)
+			RefreshPlugins (0ms)
+			BeforeProcessingInitializeOnLoad (3ms)
+			ProcessInitializeOnLoadAttributes (114ms)
+			ProcessInitializeOnLoadMethodAttributes (38ms)
+			AfterProcessingInitializeOnLoad (0ms)
+			EditorAssembliesLoaded (0ms)
+		ExecutionOrderSort2 (0ms)
+		AwakeInstancesAfterBackupRestoration (0ms)
+========================================================================
+Worker process is ready to serve import requests
+Caller must complete domain reload
+Begin MonoManager ReloadAssembly
+Symbol file LoadedFromMemory is not a mono symbol file
+- Loaded All Assemblies, in  0.847 seconds
+Native extension for WindowsStandalone target not found
+Native extension for Android target not found
+Native extension for WebGL target not found
+Mono: successfully reloaded assembly
+- Finished resetting the current domain, in  0.902 seconds
+Domain Reload Profiling: 1743ms
+	BeginReloadAssembly (142ms)
+		ExecutionOrderSort (0ms)
+		DisableScriptedObjects (7ms)
+		BackupInstance (0ms)
+		ReleaseScriptingObjects (0ms)
+		CreateAndSetChildDomain (19ms)
+	RebuildCommonClasses (35ms)
+	RebuildNativeTypeToScriptingClass (8ms)
+	initialDomainReloadingComplete (45ms)
+	LoadAllAssembliesAndSetupDomain (611ms)
+		LoadAssemblies (478ms)
+		RebuildTransferFunctionScriptingTraits (0ms)
+		AnalyzeDomain (213ms)
+			TypeCache.Refresh (184ms)
+				TypeCache.ScanAssembly (168ms)
+			ScanForSourceGeneratedMonoScriptInfo (19ms)
+			ResolveRequiredComponents (8ms)
+	FinalizeReload (902ms)
+		ReleaseScriptCaches (0ms)
+		RebuildScriptCaches (0ms)
+		SetupLoadedEditorAssemblies (737ms)
+			LogAssemblyErrors (0ms)
+			InitializePlatformSupportModulesInManaged (26ms)
+			SetLoadedEditorAssemblies (5ms)
+			RefreshPlugins (0ms)
+			BeforeProcessingInitializeOnLoad (133ms)
+			ProcessInitializeOnLoadAttributes (511ms)
+			ProcessInitializeOnLoadMethodAttributes (52ms)
+			AfterProcessingInitializeOnLoad (11ms)
+			EditorAssembliesLoaded (0ms)
+		ExecutionOrderSort2 (0ms)
+		AwakeInstancesAfterBackupRestoration (7ms)
+Launched and connected shader compiler UnityShaderCompiler.exe after 0.10 seconds
+Refreshing native plugins compatible for Editor in 21.34 ms, found 5 plugins.
+Preloading 0 native plugins for Editor in 0.00 ms.
+Unloading 5702 Unused Serialized files (Serialized files now loaded: 0)
+Unloading 32 unused Assets / (0.7 MB). Loaded Objects now: 6165.
+Memory consumption went from 218.8 MB to 218.1 MB.
+Total: 5.189900 ms (FindLiveObjects: 0.388800 ms CreateObjectMapping: 0.212200 ms MarkObjects: 4.302400 ms  DeleteObjects: 0.285000 ms)
+
+AssetImportParameters requested are different than current active one (requested -> active):
+  custom:container-demuxer-ogg: 62fdf1f143b41e24485cea50d1cbac27 -> 
+  custom:video-codec-MediaFoundation-h265: 746d11721c4dcdbdad8f713fa42b33f4 -> 
+  custom:video-decoder-ogg-theora: a1e56fd34408186e4bbccfd4996cb3dc -> 
+  custom:framework-win-MediaFoundation: 216162199b28c13a410421893ffa2e32 -> 
+  custom:CustomObjectIndexerAttribute: 72b91833f83ae208fae7752999fa3104 -> 
+  custom:container-demuxer-webm: 4f35f7cbe854078d1ac9338744f61a02 -> 
+  custom:container-muxer-webm: aa71ff27fc2769a1b78a27578f13a17b -> 
+  custom:video-decoder-webm-vp8: 9c59270c3fd7afecdb556c50c9e8de78 -> 
+  custom:SearchIndexIgnoredProperties: e643bd26f0fe6173181afceb89e7c659 -> 
+  custom:AudioImporter_EditorPlatform: d09bf68614088b80899f8185d706f6e7 -> 
+  custom:video-encoder-webm-vp8: eb34c28f22e8b96e1ab97ce403110664 -> 
+  custom:audio-decoder-ogg-vorbis: bf7c407c2cedff20999df2af8eb42d56 -> 
+  custom:audio-encoder-webm-vorbis: bf7c407c2cedff20999df2af8eb42d56 -> 
+========================================================================
+Received Import Request.
+  Time since last request: 13221.229254 seconds.
+  path: Assets/MlsMpm/Shaders/MlsMpmSurfaceCommon.hlsl
+  artifactKey: Guid(9d7495d0ca361d148b52e7093f884353) Importer(2089858483,0ecaa5967403d082aa24f35e1b516d23)
+Start importing Assets/MlsMpm/Shaders/MlsMpmSurfaceCommon.hlsl using Guid(9d7495d0ca361d148b52e7093f884353) Importer(2089858483,0ecaa5967403d082aa24f35e1b516d23) [PhysX] Initialized MultithreadedTaskDispatcher with 32 workers.
+ -> (artifact id: 'c854f46f7b8a2b76add33dd7dea09193') in 0.251143 seconds
+Number of updated asset objects reloaded before import = 0
+Number of asset objects unloaded after import = 1
+========================================================================
+Received Import Request.
+  Time since last request: 0.000037 seconds.
+  path: Assets/MlsMpm/Editor/MlsMpmEnergyAudit.cs
+  artifactKey: Guid(09a47e94c60743249961e2180b3af0c7) Importer(2089858483,0ecaa5967403d082aa24f35e1b516d23)
+Start importing Assets/MlsMpm/Editor/MlsMpmEnergyAudit.cs using Guid(09a47e94c60743249961e2180b3af0c7) Importer(2089858483,0ecaa5967403d082aa24f35e1b516d23) [PhysX] Initialized MultithreadedTaskDispatcher with 32 workers.
+ -> (artifact id: '9062b3771ba73fe8131d98d05cb2b34b') in 0.053799 seconds
+Number of updated asset objects reloaded before import = 0
+Number of asset objects unloaded after import = 1
+========================================================================
+Received Import Request.
+  Time since last request: 0.000026 seconds.
+  path: Assets/MlsMpm/Editor/MlsMpmDesktopBenchmark.cs
+  artifactKey: Guid(61e1c258a40d85d428f33ff84594dfee) Importer(2089858483,0ecaa5967403d082aa24f35e1b516d23)
+Start importing Assets/MlsMpm/Editor/MlsMpmDesktopBenchmark.cs using Guid(61e1c258a40d85d428f33ff84594dfee) Importer(2089858483,0ecaa5967403d082aa24f35e1b516d23) [PhysX] Initialized MultithreadedTaskDispatcher with 32 workers.
+ -> (artifact id: '7aafad144356f8883bb53f93c1ae5b35') in 0.010015 seconds
+Number of updated asset objects reloaded before import = 0
+Number of asset objects unloaded after import = 1
+========================================================================
+Received Import Request.
+  Time since last request: 0.000041 seconds.
+  path: Assets/ZibraBaseline/Settings/ZibraRenderer.asset
+  artifactKey: Guid(dc654be1216b7a14a9d27a9e6298940f) Importer(2089858483,0ecaa5967403d082aa24f35e1b516d23)
+Start importing Assets/ZibraBaseline/Settings/ZibraRenderer.asset using Guid(dc654be1216b7a14a9d27a9e6298940f) Importer(2089858483,0ecaa5967403d082aa24f35e1b516d23) [PhysX] Initialized MultithreadedTaskDispatcher with 32 workers.
+ -> (artifact id: 'a6b662b506b552c4a5cf82180618e1f1') in 0.072520 seconds
+Number of updated asset objects reloaded before import = 0
+Number of asset objects unloaded after import = 2
+========================================================================
+Received Import Request.
+  Time since last request: 0.000023 seconds.
+  path: Assets/ZibraBaseline/Scripts/ZibraBaselineDemo.cs
+  artifactKey: Guid(81914923c452155408e9ba088ed1558b) Importer(2089858483,0ecaa5967403d082aa24f35e1b516d23)
+Start importing Assets/ZibraBaseline/Scripts/ZibraBaselineDemo.cs using Guid(81914923c452155408e9ba088ed1558b) Importer(2089858483,0ecaa5967403d082aa24f35e1b516d23) [PhysX] Initialized MultithreadedTaskDispatcher with 32 workers.
+ -> (artifact id: '06fd07c088e7b81c3bc8e390a28a01fa') in 0.011869 seconds
+Number of updated asset objects reloaded before import = 0
+Number of asset objects unloaded after import = 1
+========================================================================
+Received Import Request.
+  Time since last request: 0.000032 seconds.
+  path: Assets/Plugins/Zibra/Liquids/DefaultSimulationPresets/SeaWater.preset
+  artifactKey: Guid(4357a29071a769a4e9ddaad97cd2a9b2) Importer(2089858483,0ecaa5967403d082aa24f35e1b516d23)
+Start importing Assets/Plugins/Zibra/Liquids/DefaultSimulationPresets/SeaWater.preset using Guid(4357a29071a769a4e9ddaad97cd2a9b2) Importer(2089858483,0ecaa5967403d082aa24f35e1b516d23) [PhysX] Initialized MultithreadedTaskDispatcher with 32 workers.
+ -> (artifact id: 'ffb1a089637b69b1f12ff2fd1a663869') in 0.013735 seconds
+Number of updated asset objects reloaded before import = 0
+Number of asset objects unloaded after import = 4
+========================================================================
+Received Import Request.
+  Time since last request: 0.000036 seconds.
+  path: Assets/Plugins/Zibra/Liquids/Editor/Settings/IPackageSettings.cs
+  artifactKey: Guid(a451cff71808b434f94a37b9b4ba7687) Importer(2089858483,0ecaa5967403d082aa24f35e1b516d23)
+Start importing Assets/Plugins/Zibra/Liquids/Editor/Settings/IPackageSettings.cs using Guid(a451cff71808b434f94a37b9b4ba7687) Importer(2089858483,0ecaa5967403d082aa24f35e1b516d23) [PhysX] Initialized MultithreadedTaskDispatcher with 32 workers.
+ -> (artifact id: '1a5c77d7c800a3a780bc62158388e34a') in 0.014499 seconds
+Number of updated asset objects reloaded before import = 0
+Number of asset objects unloaded after import = 1
+========================================================================
+Received Import Request.
+  Time since last request: 0.000034 seconds.
+  path: Assets/Plugins/Zibra/Liquids/Zibra Liquids, documentation 1.4.0.pdf
+  artifactKey: Guid(09ace81bf2ac0bd4e8c853cda11f7c84) Importer(2089858483,0ecaa5967403d082aa24f35e1b516d23)
+Start importing Assets/Plugins/Zibra/Liquids/Zibra Liquids, documentation 1.4.0.pdf using Guid(09ace81bf2ac0bd4e8c853cda11f7c84) Importer(2089858483,0ecaa5967403d082aa24f35e1b516d23) [PhysX] Initialized MultithreadedTaskDispatcher with 32 workers.
+ -> (artifact id: 'e5cc77d80d7dd4b5ac96e44e0c3de46e') in 0.008610 seconds
+Number of updated asset objects reloaded before import = 0
+Number of asset objects unloaded after import = 1
+========================================================================
+Received Import Request.
+  Time since last request: 0.000035 seconds.
+  path: Assets/Plugins/Zibra/Liquids/Samples/SampleScene/ReflectionProbe-0.exr
+  artifactKey: Guid(fa1e989068b39da41b6806a39d72716f) Importer(2089858483,0ecaa5967403d082aa24f35e1b516d23)
+Start importing Assets/Plugins/Zibra/Liquids/Samples/SampleScene/ReflectionProbe-0.exr using Guid(fa1e989068b39da41b6806a39d72716f) Importer(2089858483,0ecaa5967403d082aa24f35e1b516d23) [PhysX] Initialized MultithreadedTaskDispatcher with 32 workers.
+ -> (artifact id: '4d0fbac42948769c30d2e2da7be3bf4a') in 0.094322 seconds
+Number of updated asset objects reloaded before import = 0
+Number of asset objects unloaded after import = 1
+========================================================================
+Received Import Request.
+  Time since last request: 0.000023 seconds.
+  path: Assets/Plugins/Zibra/Liquids/Samples/SampleSceneMobile/SampleSceneMobileSettings.lighting
+  artifactKey: Guid(8ffc6099407be884abfb1b67834d9198) Importer(2089858483,0ecaa5967403d082aa24f35e1b516d23)
+Start importing Assets/Plugins/Zibra/Liquids/Samples/SampleSceneMobile/SampleSceneMobileSettings.lighting using Guid(8ffc6099407be884abfb1b67834d9198) Importer(2089858483,0ecaa5967403d082aa24f35e1b516d23) [PhysX] Initialized MultithreadedTaskDispatcher with 32 workers.
+ -> (artifact id: '35344b60156f771d5d5bb08362a9fd50') in 0.042362 seconds
+Number of updated asset objects reloaded before import = 0
+Number of asset objects unloaded after import = 1
+========================================================================
+Received Import Request.
+  Time since last request: 0.000038 seconds.
+  path: Assets/Plugins/Zibra/Liquids/Samples/SampleScene/Lightmap-1_comp_dir.png
+  artifactKey: Guid(0cf4a9dd854ab62419afc6cdb74af771) Importer(2089858483,0ecaa5967403d082aa24f35e1b516d23)
+Start importing Assets/Plugins/Zibra/Liquids/Samples/SampleScene/Lightmap-1_comp_dir.png using Guid(0cf4a9dd854ab62419afc6cdb74af771) Importer(2089858483,0ecaa5967403d082aa24f35e1b516d23) [PhysX] Initialized MultithreadedTaskDispatcher with 32 workers.
+ -> (artifact id: '0bf58cf86756bf42df37c189a892ed29') in 0.071087 seconds
+Number of updated asset objects reloaded before import = 0
+Number of asset objects unloaded after import = 1
+========================================================================
+Received Import Request.
+  Time since last request: 0.000038 seconds.
+  path: Assets/Settings/URP-Balanced-Renderer.asset
+  artifactKey: Guid(e634585d5c4544dd297acaee93dc2beb) Importer(2089858483,0ecaa5967403d082aa24f35e1b516d23)
+Start importing Assets/Settings/URP-Balanced-Renderer.asset using Guid(e634585d5c4544dd297acaee93dc2beb) Importer(2089858483,0ecaa5967403d082aa24f35e1b516d23) [PhysX] Initialized MultithreadedTaskDispatcher with 32 workers.
+ -> (artifact id: 'c4b9af8293190bc61033ee61ad8b8649') in 0.058854 seconds
+Number of updated asset objects reloaded before import = 0
+Number of asset objects unloaded after import = 3
+========================================================================
+Received Import Request.
+  Time since last request: 0.000021 seconds.
+  path: Assets/FluidComparison/Editor/FluidComparison.Editor.asmdef
+  artifactKey: Guid(54c0b344a140ce147b85bcbf73d415cd) Importer(2089858483,0ecaa5967403d082aa24f35e1b516d23)
+Start importing Assets/FluidComparison/Editor/FluidComparison.Editor.asmdef using Guid(54c0b344a140ce147b85bcbf73d415cd) Importer(2089858483,0ecaa5967403d082aa24f35e1b516d23) [PhysX] Initialized MultithreadedTaskDispatcher with 32 workers.
+ -> (artifact id: 'c807bd9b5a43974892f34add13088794') in 0.009352 seconds
+Number of updated asset objects reloaded before import = 0
+Number of asset objects unloaded after import = 1
+========================================================================
+Received Import Request.
+  Time since last request: 0.000107 seconds.
+  path: Assets/Plugins/Zibra/Liquids/Samples/Scripts/BoatController.cs
+  artifactKey: Guid(3d8c29a0cdd78fc448fd497c13d0d843) Importer(2089858483,0ecaa5967403d082aa24f35e1b516d23)
+Start importing Assets/Plugins/Zibra/Liquids/Samples/Scripts/BoatController.cs using Guid(3d8c29a0cdd78fc448fd497c13d0d843) Importer(2089858483,0ecaa5967403d082aa24f35e1b516d23) [PhysX] Initialized MultithreadedTaskDispatcher with 32 workers.
+ -> (artifact id: '2b60da28e1b26671e2295c1100226c00') in 0.007528 seconds
+Number of updated asset objects reloaded before import = 0
+Number of asset objects unloaded after import = 1
+========================================================================
+Received Import Request.
+  Time since last request: 0.000096 seconds.
+  path: Assets/Plugins/Zibra/Liquids/NativePlugin/x86/ZibraFluidNative_Win.dll
+  artifactKey: Guid(02fc45a6ef9b44bf2891985c56b59d6b) Importer(2089858483,0ecaa5967403d082aa24f35e1b516d23)
+Start importing Assets/Plugins/Zibra/Liquids/NativePlugin/x86/ZibraFluidNative_Win.dll using Guid(02fc45a6ef9b44bf2891985c56b59d6b) Importer(2089858483,0ecaa5967403d082aa24f35e1b516d23) [PhysX] Initialized MultithreadedTaskDispatcher with 32 workers.
+ -> (artifact id: '564d162c702f3206c813b9df5b0dc8a9') in 0.011648 seconds
+Number of updated asset objects reloaded before import = 0
+Number of asset objects unloaded after import = 1
+========================================================================
+Received Import Request.
+  Time since last request: 0.000087 seconds.
+  path: Assets/Plugins/Zibra/Liquids/Samples/SampleSceneMobile/ZibraLiquidBakedState.bytes
+  artifactKey: Guid(f282b58229ef8804abdf8a3f55905d3c) Importer(2089858483,0ecaa5967403d082aa24f35e1b516d23)
+Start importing Assets/Plugins/Zibra/Liquids/Samples/SampleSceneMobile/ZibraLiquidBakedState.bytes using Guid(f282b58229ef8804abdf8a3f55905d3c) Importer(2089858483,0ecaa5967403d082aa24f35e1b516d23) [PhysX] Initialized MultithreadedTaskDispatcher with 32 workers.
+ -> (artifact id: '983da9df4755232255ffeb9b2ab13089') in 0.006285 seconds
+Number of updated asset objects reloaded before import = 0
+Number of asset objects unloaded after import = 1
+========================================================================
+Received Import Request.
+  Time since last request: 0.000076 seconds.
+  path: Assets/Plugins/Zibra/Liquids/Samples/Materials/Brick Floor.mat
+  artifactKey: Guid(e13af8fa270403c439d1bcaca7a1b8c2) Importer(2089858483,0ecaa5967403d082aa24f35e1b516d23)
+Start importing Assets/Plugins/Zibra/Liquids/Samples/Materials/Brick Floor.mat using Guid(e13af8fa270403c439d1bcaca7a1b8c2) Importer(2089858483,0ecaa5967403d082aa24f35e1b516d23) [PhysX] Initialized MultithreadedTaskDispatcher with 32 workers.
+ -> (artifact id: 'ca643f12605ab0240493347eb33c9447') in 0.044437 seconds
+Number of updated asset objects reloaded before import = 0
+Number of asset objects unloaded after import = 1
+========================================================================
+Received Import Request.
+  Time since last request: 0.000018 seconds.
+  path: Assets/MlsMpm/Editor/MlsMpmDemo.cs
+  artifactKey: Guid(1cf0c49a68b9efb40a4db5d060766862) Importer(2089858483,0ecaa5967403d082aa24f35e1b516d23)
+Start importing Assets/MlsMpm/Editor/MlsMpmDemo.cs using Guid(1cf0c49a68b9efb40a4db5d060766862) Importer(2089858483,0ecaa5967403d082aa24f35e1b516d23) [PhysX] Initialized MultithreadedTaskDispatcher with 32 workers.
+ -> (artifact id: '789b127265749f8d6316f7c44a647de9') in 0.006327 seconds
+Number of updated asset objects reloaded before import = 0
+Number of asset objects unloaded after import = 1
+========================================================================
+Received Import Request.
+  Time since last request: 0.000033 seconds.
+  path: Assets/Plugins/Zibra/Liquids/Samples/SampleScene/Lightmap-2_comp_dir.png
+  artifactKey: Guid(05729af80d48b134092ddf07286734cd) Importer(2089858483,0ecaa5967403d082aa24f35e1b516d23)
+Start importing Assets/Plugins/Zibra/Liquids/Samples/SampleScene/Lightmap-2_comp_dir.png using Guid(05729af80d48b134092ddf07286734cd) Importer(2089858483,0ecaa5967403d082aa24f35e1b516d23) [PhysX] Initialized MultithreadedTaskDispatcher with 32 workers.
+ -> (artifact id: '507b24cb406299e22d26f21321c9c2fc') in 0.019880 seconds
+Number of updated asset objects reloaded before import = 0
+Number of asset objects unloaded after import = 1
+========================================================================
+Received Import Request.
+  Time since last request: 0.022304 seconds.
+  path: Assets/Plugins/Zibra/Liquids/Samples/Scripts/PlayerController.cs
+  artifactKey: Guid(a7c002340bc9bf24c80d7ba7ff2b6c20) Importer(2089858483,0ecaa5967403d082aa24f35e1b516d23)
+Start importing Assets/Plugins/Zibra/Liquids/Samples/Scripts/PlayerController.cs using Guid(a7c002340bc9bf24c80d7ba7ff2b6c20) Importer(2089858483,0ecaa5967403d082aa24f35e1b516d23) [PhysX] Initialized MultithreadedTaskDispatcher with 32 workers.
+ -> (artifact id: '7675697225a0f4b40621d7f18d650a21') in 0.008118 seconds
+Number of updated asset objects reloaded before import = 0
+Number of asset objects unloaded after import = 1
+========================================================================
+Received Import Request.
+  Time since last request: 0.000018 seconds.
+  path: Assets/Plugins/Zibra/Liquids/Scripts/Solver/ZibraLiquidHDRP.cs
+  artifactKey: Guid(fc4fc8d45131be14f98fbf298333bd6f) Importer(2089858483,0ecaa5967403d082aa24f35e1b516d23)
+Start importing Assets/Plugins/Zibra/Liquids/Scripts/Solver/ZibraLiquidHDRP.cs using Guid(fc4fc8d45131be14f98fbf298333bd6f) Importer(2089858483,0ecaa5967403d082aa24f35e1b516d23) [PhysX] Initialized MultithreadedTaskDispatcher with 32 workers.
+ -> (artifact id: '23e2ae14668a1ce6733667a775e2efbc') in 0.006355 seconds
+Number of updated asset objects reloaded before import = 0
+Number of asset objects unloaded after import = 1
+========================================================================
+Received Import Request.
+  Time since last request: 0.000089 seconds.
+  path: Assets/Plugins/Zibra/Liquids/Editor/Art/Icons/Generic/settings.png
+  artifactKey: Guid(72b88d09b64a44744bed8d56d192aca9) Importer(2089858483,0ecaa5967403d082aa24f35e1b516d23)
+Start importing Assets/Plugins/Zibra/Liquids/Editor/Art/Icons/Generic/settings.png using Guid(72b88d09b64a44744bed8d56d192aca9) Importer(2089858483,0ecaa5967403d082aa24f35e1b516d23) [PhysX] Initialized MultithreadedTaskDispatcher with 32 workers.
+ -> (artifact id: '7ac97a258d123026d83ca526464159e4') in 0.014197 seconds
+Number of updated asset objects reloaded before import = 0
+Number of asset objects unloaded after import = 1
+========================================================================
+Received Import Request.
+  Time since last request: 0.000021 seconds.
+  path: Assets/Plugins/Zibra/Liquids/Scripts/Solver/Manipulators/ZibraLiquidDetector.cs
+  artifactKey: Guid(c0c2b90a17fbfbd44807e4d99b680a8a) Importer(2089858483,0ecaa5967403d082aa24f35e1b516d23)
+Start importing Assets/Plugins/Zibra/Liquids/Scripts/Solver/Manipulators/ZibraLiquidDetector.cs using Guid(c0c2b90a17fbfbd44807e4d99b680a8a) Importer(2089858483,0ecaa5967403d082aa24f35e1b516d23) [PhysX] Initialized MultithreadedTaskDispatcher with 32 workers.
+ -> (artifact id: 'b55adb6e309a91b14d78da7c9dbe39e7') in 0.018111 seconds
+Number of updated asset objects reloaded before import = 0
+Number of asset objects unloaded after import = 2
+========================================================================
+Received Import Request.
+  Time since last request: 0.000022 seconds.
+  path: Assets/Plugins/Zibra/Liquids/Scripts/Solver/Manipulator.cs
+  artifactKey: Guid(48f25d42f6edd93488a085676bcb48a4) Importer(2089858483,0ecaa5967403d082aa24f35e1b516d23)
+Start importing Assets/Plugins/Zibra/Liquids/Scripts/Solver/Manipulator.cs using Guid(48f25d42f6edd93488a085676bcb48a4) Importer(2089858483,0ecaa5967403d082aa24f35e1b516d23) [PhysX] Initialized MultithreadedTaskDispatcher with 32 workers.
+ -> (artifact id: '74822a40d3085aba94e727d9693e2051') in 0.007162 seconds
+Number of updated asset objects reloaded before import = 0
+Number of asset objects unloaded after import = 1
+========================================================================
+Received Import Request.
+  Time since last request: 0.000022 seconds.
+  path: Assets/Plugins/Zibra/Liquids/Scripts/Solver/ZibraManipulatorManager.cs
+  artifactKey: Guid(5fe820c5af7ce834bb279013a71dd089) Importer(2089858483,0ecaa5967403d082aa24f35e1b516d23)
+Start importing Assets/Plugins/Zibra/Liquids/Scripts/Solver/ZibraManipulatorManager.cs using Guid(5fe820c5af7ce834bb279013a71dd089) Importer(2089858483,0ecaa5967403d082aa24f35e1b516d23) [PhysX] Initialized MultithreadedTaskDispatcher with 32 workers.
+ -> (artifact id: '5ee94ea77644c56cc7f5d9ef2af6bd95') in 0.007447 seconds
+Number of updated asset objects reloaded before import = 0
+Number of asset objects unloaded after import = 1
+========================================================================
+Received Import Request.
+  Time since last request: 0.000070 seconds.
+  path: Assets/Plugins/Zibra/Liquids/Editor/Art/Icons/About/game.png
+  artifactKey: Guid(327852e766b6ce14da7ab3c9ded79df3) Importer(2089858483,0ecaa5967403d082aa24f35e1b516d23)
+Start importing Assets/Plugins/Zibra/Liquids/Editor/Art/Icons/About/game.png using Guid(327852e766b6ce14da7ab3c9ded79df3) Importer(2089858483,0ecaa5967403d082aa24f35e1b516d23) [PhysX] Initialized MultithreadedTaskDispatcher with 32 workers.
+ -> (artifact id: '91bf35fbc2c6aa87ff06b4cfeb44c7a4') in 0.012371 seconds
+Number of updated asset objects reloaded before import = 0
+Number of asset objects unloaded after import = 1
+========================================================================
+Received Import Request.
+  Time since last request: 0.000017 seconds.
+  path: Assets/Plugins/Zibra/Liquids/Editor/Art/Icons/Generic/arrow_right.png
+  artifactKey: Guid(1453215d62f54dc4ea65c4102184da07) Importer(2089858483,0ecaa5967403d082aa24f35e1b516d23)
+Start importing Assets/Plugins/Zibra/Liquids/Editor/Art/Icons/Generic/arrow_right.png using Guid(1453215d62f54dc4ea65c4102184da07) Importer(2089858483,0ecaa5967403d082aa24f35e1b516d23) [PhysX] Initialized MultithreadedTaskDispatcher with 32 workers.
+ -> (artifact id: 'ee941e4f4004a5a9ae2e2f30f1d6c445') in 0.017943 seconds
+Number of updated asset objects reloaded before import = 0
+Number of asset objects unloaded after import = 1
+========================================================================
+Received Import Request.
+  Time since last request: 0.000022 seconds.
+  path: Assets/Plugins/Zibra/Liquids/Editor/Art/Icons/Social/google-plus.png
+  artifactKey: Guid(7f6e01f2f83375d4db298a24caa95796) Importer(2089858483,0ecaa5967403d082aa24f35e1b516d23)
+Start importing Assets/Plugins/Zibra/Liquids/Editor/Art/Icons/Social/google-plus.png using Guid(7f6e01f2f83375d4db298a24caa95796) Importer(2089858483,0ecaa5967403d082aa24f35e1b516d23) [PhysX] Initialized MultithreadedTaskDispatcher with 32 workers.
+ -> (artifact id: '3474b3c22ea85333855df04d9a623ccd') in 0.013199 seconds
+Number of updated asset objects reloaded before import = 0
+Number of asset objects unloaded after import = 1
+========================================================================
+Received Import Request.
+  Time since last request: 0.000028 seconds.
+  path: Assets/Plugins/Zibra/Liquids/Scripts/Solver/Editor/HideFlagsUtility.cs
+  artifactKey: Guid(293d23aa5af8eea498b80a87643fe412) Importer(2089858483,0ecaa5967403d082aa24f35e1b516d23)
+Start importing Assets/Plugins/Zibra/Liquids/Scripts/Solver/Editor/HideFlagsUtility.cs using Guid(293d23aa5af8eea498b80a87643fe412) Importer(2089858483,0ecaa5967403d082aa24f35e1b516d23) [PhysX] Initialized MultithreadedTaskDispatcher with 32 workers.
+ -> (artifact id: 'dd5292b6f42672f99a73aa94bc1b4c58') in 0.007055 seconds
+Number of updated asset objects reloaded before import = 0
+Number of asset objects unloaded after import = 1
+========================================================================
+Received Import Request.
+  Time since last request: 0.000023 seconds.
+  path: Assets/Plugins/Zibra/Liquids/Editor/Art/Icons/Generic/download.png
+  artifactKey: Guid(450bb0c1ef0486640aba26b549caa5d4) Importer(2089858483,0ecaa5967403d082aa24f35e1b516d23)
+Start importing Assets/Plugins/Zibra/Liquids/Editor/Art/Icons/Generic/download.png using Guid(450bb0c1ef0486640aba26b549caa5d4) Importer(2089858483,0ecaa5967403d082aa24f35e1b516d23) [PhysX] Initialized MultithreadedTaskDispatcher with 32 workers.
+ -> (artifact id: '52c99c3518fbbfc7a977d2e36c972562') in 0.016923 seconds
+Number of updated asset objects reloaded before import = 0
+Number of asset objects unloaded after import = 1
+========================================================================
+Received Import Request.
+  Time since last request: 0.000017 seconds.
+  path: Assets/Plugins/Zibra/Liquids/Scripts/DataStructures/VoxelRepresentation.cs
+  artifactKey: Guid(52985f2ce71fa1940b125140444d99a8) Importer(2089858483,0ecaa5967403d082aa24f35e1b516d23)
+Start importing Assets/Plugins/Zibra/Liquids/Scripts/DataStructures/VoxelRepresentation.cs using Guid(52985f2ce71fa1940b125140444d99a8) Importer(2089858483,0ecaa5967403d082aa24f35e1b516d23) [PhysX] Initialized MultithreadedTaskDispatcher with 32 workers.
+ -> (artifact id: '6af908e47383b66dd51e462bf84c1287') in 0.007367 seconds
+Number of updated asset objects reloaded before import = 0
+Number of asset objects unloaded after import = 1
+========================================================================
+Received Import Request.
+  Time since last request: 0.000074 seconds.
+  path: Assets/Plugins/Zibra/Liquids/Editor/Art/Icons/Objects/AnalyticalCollider.png
+  artifactKey: Guid(a40a0aac704ba9e43b16e22b2cc6628c) Importer(2089858483,0ecaa5967403d082aa24f35e1b516d23)
+Start importing Assets/Plugins/Zibra/Liquids/Editor/Art/Icons/Objects/AnalyticalCollider.png using Guid(a40a0aac704ba9e43b16e22b2cc6628c) Importer(2089858483,0ecaa5967403d082aa24f35e1b516d23) [PhysX] Initialized MultithreadedTaskDispatcher with 32 workers.
+ -> (artifact id: 'af29e57385d75997af5418031a8bd01e') in 0.019376 seconds
+Number of updated asset objects reloaded before import = 0
+Number of asset objects unloaded after import = 1
+========================================================================
+Received Import Request.
+  Time since last request: 0.241705 seconds.
+  path: Assets/Plugins/Zibra/Liquids/Editor/UIToolkit/Controls/LoadingSpinner/LoadingSpinner.uss
+  artifactKey: Guid(daf060fd6c787a742ae8f848e95f028d) Importer(2089858483,0ecaa5967403d082aa24f35e1b516d23)
+Start importing Assets/Plugins/Zibra/Liquids/Editor/UIToolkit/Controls/LoadingSpinner/LoadingSpinner.uss using Guid(daf060fd6c787a742ae8f848e95f028d) Importer(2089858483,0ecaa5967403d082aa24f35e1b516d23) [PhysX] Initialized MultithreadedTaskDispatcher with 32 workers.
+ -> (artifact id: '632124f7fbea45cfeb45ddc4061bbd0d') in 0.014071 seconds
+Number of updated asset objects reloaded before import = 0
+Number of asset objects unloaded after import = 2
+Editor requested this worker to shutdown with reason: Scaling down because of idle timeout
+TcpMessagingSession - receive error: operation aborted. errorcode: 995, details: The I/O operation has been aborted because of either a thread exit or an application request.
+AssetImportWorker is now disconnected from the server
+Process exiting
+Exiting without the bug reporter. Application will terminate with return code 0

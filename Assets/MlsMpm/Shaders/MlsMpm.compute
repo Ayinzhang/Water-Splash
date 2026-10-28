@@ -29,7 +29,10 @@ int _CellCount;
 float _Dt;
 float _RestDensity;
 float _BulkModulus;
+float _PressureExponent;
 float _Viscosity;
+float _AffineRetention;
+float _DivergenceRetention;
 float3 _Acceleration;
 float4 _Sphere;
 float3 _SphereVelocity;
@@ -174,7 +177,9 @@ void TransferStress(uint id : SV_DispatchThreadID)
     p.velocity.w = ratio;
     _Particles[id] = p;
 
-    float pressure = _BulkModulus * max(ratio * ratio * ratio - 1.0, 0.0);
+    float compression = _PressureExponent == 3 ? ratio * ratio * ratio :
+        (_PressureExponent == 1 ? ratio : pow(ratio, _PressureExponent));
+    float pressure = _BulkModulus * max(compression - 1.0, 0.0);
     float3x3 c = float3x3(p.affineX.xyz, p.affineY.xyz, p.affineZ.xyz);
     float3x3 stress = _Viscosity * (c + transpose(c));
     stress[0][0] -= pressure;
@@ -296,6 +301,12 @@ void UpdateParticles(uint id : SV_DispatchThreadID)
             contact = true;
         }
     }
+    // Decay the affine velocity gradient in physical seconds. The isotropic
+    // component controls compression/expansion; translation is not speed-clamped.
+    float isotropic = (cx.x + cy.y + cz.z) / 3.0;
+    float isotropicLoss = isotropic * (1.0 - _DivergenceRetention);
+    cx.x -= isotropicLoss; cy.y -= isotropicLoss; cz.z -= isotropicLoss;
+    cx *= _AffineRetention; cy *= _AffineRetention; cz *= _AffineRetention;
     p.position = float4(position, 1);
     p.velocity.xyz = velocity;
     p.affineX = float4(contact ? 0 : cx, 0);

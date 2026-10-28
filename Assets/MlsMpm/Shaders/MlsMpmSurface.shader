@@ -23,6 +23,38 @@ Shader "Hidden/WaterSplash/Continuous Surface"
         float4 _FluidAbsorption;
         float4 _FluidWaterColor;
         float _FluidRefraction;
+        float _ContinuousFoam;
+
+        float FoamNoise(float2 p)
+        {
+            float2 cell = floor(p), f = frac(p); f = f * f * (3 - 2 * f);
+            float4 h = frac(sin(float4(dot(cell, float2(127.1,311.7)),
+                dot(cell + float2(1,0), float2(127.1,311.7)),
+                dot(cell + float2(0,1), float2(127.1,311.7)),
+                dot(cell + 1, float2(127.1,311.7)))) * 43758.5453);
+            return lerp(lerp(h.x, h.y, f.x), lerp(h.z, h.w, f.x), f.y);
+        }
+
+        float FoamCoverage(float2 uv, float depth, float3 positionWS)
+        {
+            float density = SAMPLE_TEXTURE2D(_FluidFoam, sampler_LinearClamp, uv).r;
+            if (_ContinuousFoam < .5) return 1 - exp(-1.5 * density);
+            float sum = density * 4, weight = 4;
+            const float2 offsets[4] = { float2(-1,0), float2(1,0), float2(0,-1), float2(0,1) };
+            [unroll] for (int i = 0; i < 4; i++)
+            {
+                float2 sampleUv = uv + offsets[i] * _FluidBufferSize.zw * 1.5;
+                float otherDepth = SAMPLE_TEXTURE2D(_FluidDepth, sampler_PointClamp, sampleUv).r;
+                float valid = otherDepth > 0 ? saturate(1 - abs(otherDepth - depth) / _FluidDepthRange) : 0;
+                sum += valid * SAMPLE_TEXTURE2D(_FluidFoam, sampler_LinearClamp, sampleUv).r; weight += valid;
+            }
+            density = sum / weight;
+            // Detail breaks up the common foam field rather than outlining every seed.
+            float2 p = (positionWS.xz + positionWS.y * float2(.31,.47)) * 18;
+            float grain = lerp(FoamNoise(p), FoamNoise(p * 2.13), .3);
+            float coverage = 1 - exp(-3.8 * density);
+            return saturate(coverage * lerp(.78, 1.12, grain));
+        }
 
         struct SurfaceVaryings
         {
@@ -176,7 +208,7 @@ Shader "Hidden/WaterSplash/Continuous Surface"
             environment += 2.0 * pow(saturate(dot(reflected, light)), 48.0);
             float highlight = pow(saturate(dot(normalWS, normalize(light + viewWS))), 256.0);
             WaterOutput output;
-            float coverage = 1.0 - exp(-1.5 * SAMPLE_TEXTURE2D(_FluidFoam, sampler_LinearClamp, input.uv).r);
+            float coverage = FoamCoverage(input.uv, depth, mul(UNITY_MATRIX_I_V, float4(positionVS, 1)).xyz);
             float3 water = lerp(transmitted, environment, fresnel) + highlight * 0.4;
             float3 foam = float3(0.9, 0.96, 1.0) * (0.75 + 0.25 * saturate(dot(normalWS, light)));
             output.color = half4(lerp(water, foam, coverage * 0.95), 1);
