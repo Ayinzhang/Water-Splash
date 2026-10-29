@@ -1,0 +1,597 @@
+#pragma kernel ClearGrid
+#pragma kernel TransferMass
+#pragma kernel TransferStress
+#pragma kernel UpdateGrid
+#pragma kernel UpdateParticles
+#pragma kernel ClearWhitewater
+#pragma kernel ClearWhitewaterCounts
+#pragma kernel UpdateWhitewater
+#pragma kernel ClearSortBins
+#pragma kernel CountSortBins
+#pragma kernel ScanSortBins
+#pragma kernel ScatterSortedParticles
+#pragma kernel CopySortedParticles
+#pragma kernel PbPrepare
+#pragma kernel PbProject
+#pragma kernel PbScatter
+#pragma kernel PbGrid
+#pragma kernel PbGather
+#pragma kernel PbIntegrate
+#pragma kernel PbExportGrid
+
+#include "MlsMpmWhitewater.hlsl"
+
+struct Particle
+{
+    float4 position;
+    float4 velocity;
+    float4 affineX;
+    float4 affineY;
+    float4 affineZ;
+};
+
+RWStructuredBuffer<Particle> _Particles;
+RWStructuredBuffer<int> _Accumulation;
+RWStructuredBuffer<float4> _Grid;
+RWStructuredBuffer<uint> _Diagnostics;
+
+int _ParticleCount;
+int _Resolution;
+int _CellCount;
+float _Dt;
+float _RestDensity;
+float _BulkModulus;
+float _PressureExponent;
+float _Viscosity;
+float _AffineRetention;
+float _DivergenceRetention;
+float3 _Acceleration;
+float4 _Sphere;
+float3 _SphereVelocity;
+RWStructuredBuffer<Whitewater> _Whitewater;
+AppendStructuredBuffer<uint> _FoamIndices;
+AppendStructuredBuffer<uint> _SprayIndices;
+int _WhitewaterCapacity;
+int _WhitewaterStep;
+float _WhitewaterDt;
+float _WhitewaterCellSize;
+float _WhitewaterSpacing;
+float _WhitewaterEmission;
+float _WhitewaterLifetime;
+float _WhitewaterSpeed;
+float _WhitewaterDeformation;
+float3 _WhitewaterGravity;
+
+#include "BottleBoundary.hlsl"
+
+static const float MassScale = 65536.0;
+static const float MomentumScale = 4096.0;
+
+void Fault(uint flag, uint particle)
+{
+    InterlockedOr(_Diagnostics[0], flag);
+    InterlockedMin(_Diagnostics[3], particle);
+}
+
+void Accumulate(uint address, float value, float scale, uint particle)
+{
+    float encoded = round(value * scale);
+    if (!isfinite(encoded) || abs(encoded) > 2147483000.0)
+    {
+        Fault(2, particle);
+        return;
+    }
+
+    int increment = (int)encoded;
+    int previous;
+    InterlockedAdd(_Accumulation[address], increment, previous);
+    if ((increment > 0 && previous > 2147483647 - increment) ||
+        (increment < 0 && previous < (-2147483647 - 1) - increment))
+        Fault(2, particle);
+}
+
+uint CellIndex(int3 cell)
+{
+    return cell.x + _Resolution * (cell.y + _Resolution * cell.z);
+}
+
+bool ValidCell(int3 cell)
+{
+    return all(cell >= 0) && all(cell < _Resolution);
+}
+
+void Weights(float3 position, out int3 origin, out float3 w[3])
+{
+    origin = (int3)floor(position - 0.5);
+    float3 f = position - origin;
+    w[0] = 0.5 * (1.5 - f) * (1.5 - f);
+    w[1] = 0.75 - (f - 1.0) * (f - 1.0);
+    w[2] = 0.5 * (f - 0.5) * (f - 0.5);
+}
+
+float3 AffineVelocity(Particle p, float3 offset)
+{
+    return float3(dot(p.affineX.xyz, offset),
+                  dot(p.affineY.xyz, offset),
+                  dot(p.affineZ.xyz, offset));
+}
+
+[numthreads(128, 1, 1)]
+void ClearGrid(uint id : SV_DispatchThreadID)
+{
+    if (id >= (uint)_CellCount) return;
+    for (uint channel = 0; channel < 4; channel++)
+        _Accumulation[id * 4 + channel] = 0;
+    _Grid[id] = 0;
+}
+
+[numthreads(128, 1, 1)]
+void TransferMass(uint id : SV_DispatchThreadID)
+{
+    if (id >= (uint)_ParticleCount || _Diagnostics[0] != 0) return;
+    Particle p = _Particles[id];
+    if (!all(isfinite(p.position)) || !all(isfinite(p.velocity)) ||
+        !all(isfinite(p.affineX)) || !all(isfinite(p.affineY)) || !all(isfinite(p.affineZ)))
+    {
+        Fault(1, id);
+        return;
+    }
+    if (any(p.position.xyz < 2.0) || any(p.position.xyz > _Resolution - 3.0))
+    {
+        Fault(4, id);
+        return;
+    }
+    int3 origin;
+    float3 w[3];
+    Weights(p.position.xyz, origin, w);
+
+    for (int z = 0; z < 3; z++)
+    for (int y = 0; y < 3; y++)
+    for (int x = 0; x < 3; x++)
+    {
+        int3 cell = origin + int3(x, y, z);
+        if (!ValidCell(cell)) { Fault(4, id); continue; }
+        float weight = w[x].x * w[y].y * w[z].z;
+        float3 momentum = weight * (p.velocity.xyz + AffineVelocity(p, cell - p.position.xyz));
+        uint address = CellIndex(cell) * 4;
+        Accumulate(address, weight, MassScale, id);
+        Accumulate(address + 1, momentum.x, MomentumScale, id);
+        Accumulate(address + 2, momentum.y, MomentumScale, id);
+        Accumulate(address + 3, momentum.z, MomentumScale, id);
+    }
+}
+
+[numthreads(128, 1, 1)]
+void TransferStress(uint id : SV_DispatchThreadID)
+{
+    if (id >= (uint)_ParticleCount || _Diagnostics[0] != 0) return;
+    Particle p = _Particles[id];
+    int3 origin;
+    float3 w[3];
+    Weights(p.position.xyz, origin, w);
+    float density = 0;
+
+    for (int z = 0; z < 3; z++)
+    for (int y = 0; y < 3; y++)
+    for (int x = 0; x < 3; x++)
+    {
+        int3 cell = origin + int3(x, y, z);
+        if (!ValidCell(cell)) { Fault(4, id); continue; }
+        density += w[x].x * w[y].y * w[z].z *
+            (_Accumulation[CellIndex(cell) * 4] / MassScale);
+    }
+
+    float ratio = density / _RestDensity;
+    if (!isfinite(ratio) || density <= 0 || ratio > 4.0)
+    {
+        Fault(8, id);
+        return;
+    }
+    InterlockedMax(_Diagnostics[1], (uint)round(ratio * 1024.0));
+    p.velocity.w = ratio;
+    _Particles[id] = p;
+
+    float compression = _PressureExponent == 3 ? ratio * ratio * ratio :
+        (_PressureExponent == 1 ? ratio : pow(ratio, _PressureExponent));
+    float pressure = _BulkModulus * max(compression - 1.0, 0.0);
+    float3x3 c = float3x3(p.affineX.xyz, p.affineY.xyz, p.affineZ.xyz);
+    float3x3 stress = _Viscosity * (c + transpose(c));
+    stress[0][0] -= pressure;
+    stress[1][1] -= pressure;
+    stress[2][2] -= pressure;
+    // For the quadratic B-spline in grid coordinates, inverse moment is 4 I.
+    float3x3 force = (-4.0 * _Dt / density) * stress;
+
+    for (int sz = 0; sz < 3; sz++)
+    for (int sy = 0; sy < 3; sy++)
+    for (int sx = 0; sx < 3; sx++)
+    {
+        int3 cell = origin + int3(sx, sy, sz);
+        if (!ValidCell(cell)) continue;
+        float weight = w[sx].x * w[sy].y * w[sz].z;
+        float3 impulse = weight * mul(force, cell - p.position.xyz);
+        uint address = CellIndex(cell) * 4;
+        Accumulate(address + 1, impulse.x, MomentumScale, id);
+        Accumulate(address + 2, impulse.y, MomentumScale, id);
+        Accumulate(address + 3, impulse.z, MomentumScale, id);
+    }
+}
+
+float3 SphereBoundary(float3 position, float3 velocity)
+{
+    float3 offset = position - _Sphere.xyz;
+    if (_Sphere.w > 0 && dot(offset, offset) < _Sphere.w * _Sphere.w)
+    {
+        float3 normal = dot(offset, offset) > 1e-10 ? normalize(offset) : float3(0, 1, 0);
+        float3 relative = velocity - _SphereVelocity;
+        velocity -= min(dot(relative, normal), 0.0) * normal;
+    }
+    return velocity;
+}
+
+[numthreads(128, 1, 1)]
+void UpdateGrid(uint id : SV_DispatchThreadID)
+{
+    if (id >= (uint)_CellCount || _Diagnostics[0] != 0) return;
+    uint address = id * 4;
+    float mass = _Accumulation[address] / MassScale;
+    if (mass <= 0) return;
+    float3 velocity = float3(_Accumulation[address + 1], _Accumulation[address + 2],
+                            _Accumulation[address + 3]) / (MomentumScale * mass);
+    velocity += _Acceleration * _Dt;
+    int3 cell = int3(id % _Resolution, (id / _Resolution) % _Resolution,
+                    id / (_Resolution * _Resolution));
+    velocity = SphereBoundary(cell, velocity);
+    velocity = BottleGridBoundary(cell, velocity);
+    if (cell.x < 3) velocity.x = max(velocity.x, 0);
+    if (cell.y < 3) velocity.y = max(velocity.y, 0);
+    if (cell.z < 3) velocity.z = max(velocity.z, 0);
+    if (cell.x > _Resolution - 4) velocity.x = min(velocity.x, 0);
+    if (cell.y > _Resolution - 4) velocity.y = min(velocity.y, 0);
+    if (cell.z > _Resolution - 4) velocity.z = min(velocity.z, 0);
+    if (!all(isfinite(velocity))) { Fault(1, 0xffffffff); return; }
+    _Grid[id] = float4(velocity, mass);
+}
+
+[numthreads(128, 1, 1)]
+void UpdateParticles(uint id : SV_DispatchThreadID)
+{
+    if (id >= (uint)_ParticleCount || _Diagnostics[0] != 0) return;
+    Particle p = _Particles[id];
+    int3 origin;
+    float3 w[3];
+    Weights(p.position.xyz, origin, w);
+    float3 velocity = 0;
+    float3 cx = 0, cy = 0, cz = 0;
+
+    for (int z = 0; z < 3; z++)
+    for (int y = 0; y < 3; y++)
+    for (int x = 0; x < 3; x++)
+    {
+        int3 cell = origin + int3(x, y, z);
+        if (!ValidCell(cell)) { Fault(4, id); continue; }
+        float weight = w[x].x * w[y].y * w[z].z;
+        float3 weighted = weight * _Grid[CellIndex(cell)].xyz;
+        float3 offset = cell - p.position.xyz;
+        velocity += weighted;
+        cx += 4.0 * weighted.x * offset;
+        cy += 4.0 * weighted.y * offset;
+        cz += 4.0 * weighted.z * offset;
+    }
+
+    if (!all(isfinite(velocity)) || !all(isfinite(cx)) ||
+        !all(isfinite(cy)) || !all(isfinite(cz)))
+    {
+        Fault(1, id);
+        return;
+    }
+    float speed = length(velocity);
+    InterlockedMax(_Diagnostics[2], (uint)round(min(speed, 100000.0) * 1024.0));
+    if (speed * _Dt > 0.75) { Fault(16, id); return; }
+
+    float3 position = p.position.xyz + _Dt * velocity;
+    float3 offsetSphere = position - _Sphere.xyz;
+    bool contact = BottleProject(position, velocity);
+    if (_Sphere.w > 0 && dot(offsetSphere, offsetSphere) < _Sphere.w * _Sphere.w)
+    {
+        float3 normal = dot(offsetSphere, offsetSphere) > 1e-10 ?
+            normalize(offsetSphere) : float3(0, 1, 0);
+        position = _Sphere.xyz + normal * _Sphere.w;
+        velocity = SphereBoundary(_Sphere.xyz + normal * (_Sphere.w * 0.999), velocity);
+        contact = true;
+    }
+    [unroll]
+    for (int axis = 0; axis < 3; axis++)
+    {
+        if (position[axis] < 2.0)
+        {
+            position[axis] = 2.0;
+            velocity[axis] = max(velocity[axis], 0);
+            contact = true;
+        }
+        if (position[axis] > _Resolution - 3.0)
+        {
+            position[axis] = _Resolution - 3.0;
+            velocity[axis] = min(velocity[axis], 0);
+            contact = true;
+        }
+    }
+    // Decay the affine velocity gradient in physical seconds. The isotropic
+    // component controls compression/expansion; translation is not speed-clamped.
+    float isotropic = (cx.x + cy.y + cz.z) / 3.0;
+    float isotropicLoss = isotropic * (1.0 - _DivergenceRetention);
+    cx.x -= isotropicLoss; cy.y -= isotropicLoss; cz.z -= isotropicLoss;
+    cx *= _AffineRetention; cy *= _AffineRetention; cz *= _AffineRetention;
+    p.position = float4(position, 1);
+    p.velocity.xyz = velocity;
+    p.affineX = float4(contact ? 0 : cx, 0);
+    p.affineY = float4(contact ? 0 : cy, 0);
+    p.affineZ = float4(contact ? 0 : cz, 0);
+    _Particles[id] = p;
+}
+
+float WhitewaterMass(int3 cell)
+{
+    return ValidCell(cell) ? _Grid[CellIndex(cell)].w / _RestDensity : 0;
+}
+
+float4 WhitewaterFlow(float3 position)
+{
+    int3 origin = (int3)floor(position);
+    float3 f = position - origin;
+    float4 result = 0;
+    float velocityWeight = 0;
+    [unroll]
+    for (int z = 0; z < 2; z++)
+    [unroll]
+    for (int y = 0; y < 2; y++)
+    [unroll]
+    for (int x = 0; x < 2; x++)
+    {
+        int3 cell = origin + int3(x, y, z);
+        if (!ValidCell(cell)) continue;
+        float3 weights = lerp(1.0 - f, f, float3(x, y, z));
+        float weight = weights.x * weights.y * weights.z;
+        float4 node = _Grid[CellIndex(cell)];
+        result.w += weight * node.w / _RestDensity;
+        if (node.w > _RestDensity * 0.03)
+        {
+            result.xyz += weight * node.xyz;
+            velocityWeight += weight;
+        }
+    }
+    result.xyz /= max(velocityWeight, 1e-6);
+    return result;
+}
+
+bool WhitewaterSurface(float3 position, float density, out float3 normal, out float gradientSize)
+{
+    int3 cell = (int3)round(position);
+    float3 gradient = 0.5 * float3(
+        WhitewaterMass(cell + int3(1,0,0)) - WhitewaterMass(cell - int3(1,0,0)),
+        WhitewaterMass(cell + int3(0,1,0)) - WhitewaterMass(cell - int3(0,1,0)),
+        WhitewaterMass(cell + int3(0,0,1)) - WhitewaterMass(cell - int3(0,0,1)));
+    gradientSize = length(gradient);
+    normal = -gradient / max(gradientSize, 1e-6);
+    if (density < 0.08 || density > 2.5 || gradientSize < 0.025) return false;
+    // Empty solid boundaries must not be mistaken for a water-air interface.
+    if (any((position < 3.3) & (normal < -0.25)) ||
+        any((position > _Resolution - 4.3) & (normal > 0.25))) return false;
+    if (_Sphere.w > 0 && length(position - _Sphere.xyz) < _Sphere.w + 1.2 &&
+        dot(normal, position - _Sphere.xyz) < 0) return false;
+    float3 wallNormal;
+    if (BottleDistance(position, wallNormal) > -1.5 && dot(normal, wallNormal) > .2) return false;
+    return WhitewaterMass((int3)round(position + normal * 1.5)) < 0.3;
+}
+
+void WhitewaterBoundary(inout Whitewater p)
+{
+    BottleProject(p.position.xyz, p.velocity.xyz);
+    [unroll]
+    for (int axis = 0; axis < 3; axis++)
+    {
+        if (p.position[axis] < 2)
+        {
+            p.position[axis] = 2;
+            p.velocity[axis] = max(p.velocity[axis], 0);
+        }
+        if (p.position[axis] > _Resolution - 3)
+        {
+            p.position[axis] = _Resolution - 3;
+            p.velocity[axis] = min(p.velocity[axis], 0);
+        }
+    }
+    float3 offset = p.position.xyz - _Sphere.xyz;
+    if (_Sphere.w > 0 && dot(offset, offset) < _Sphere.w * _Sphere.w)
+    {
+        float3 normal = dot(offset, offset) > 1e-10 ? normalize(offset) : float3(0,1,0);
+        p.position.xyz = _Sphere.xyz + normal * _Sphere.w;
+        p.velocity.xyz = SphereBoundary(_Sphere.xyz + normal * (_Sphere.w * 0.999), p.velocity.xyz);
+    }
+}
+
+[numthreads(128, 1, 1)]
+void ClearWhitewater(uint id : SV_DispatchThreadID)
+{
+    if (id >= (uint)_WhitewaterCapacity) return;
+    _Whitewater[id] = (Whitewater)0;
+    if (id == 0)
+    {
+        _Diagnostics[4] = 0;
+        _Diagnostics[5] = 0;
+        _Diagnostics[6] = 0;
+        _Diagnostics[7] = 0;
+    }
+}
+
+[numthreads(1, 1, 1)]
+void ClearWhitewaterCounts(uint id : SV_DispatchThreadID)
+{
+    _Diagnostics[4] = 0;
+    _Diagnostics[5] = 0;
+}
+
+[numthreads(128, 1, 1)]
+void UpdateWhitewater(uint id : SV_DispatchThreadID)
+{
+    if (id >= (uint)_WhitewaterCapacity) return;
+    Whitewater p = _Whitewater[id];
+    if (_Diagnostics[0] != 0) { _Whitewater[id] = (Whitewater)0; return; }
+    if (p.position.w > 0)
+    {
+        float4 flow = WhitewaterFlow(p.position.xyz);
+        float3 normal;
+        float gradientSize;
+        bool surface = WhitewaterSurface(p.position.xyz, flow.w, normal, gradientSize);
+        if (surface && (p.normalType.w > 0.5 || flow.w > 0.25))
+        {
+            p.normalType = float4(normal, 1);
+            p.velocity.xyz = lerp(p.velocity.xyz, flow.xyz, 1.0 - exp(-10.0 * _WhitewaterDt));
+            p.position.xyz += normal * clamp((flow.w - 0.4) / max(gradientSize, 0.05), -0.5, 0.5);
+        }
+        else
+        {
+            p.normalType.w = 0;
+            p.velocity.xyz += _WhitewaterGravity * _WhitewaterDt;
+            p.velocity.xyz *= exp(-0.25 * _WhitewaterDt);
+        }
+        p.position.xyz += p.velocity.xyz * _WhitewaterDt;
+        p.position.w -= _WhitewaterDt * (!surface && flow.w > 0.6 ? 6.0 : 1.0);
+        WhitewaterBoundary(p);
+        if (!all(isfinite(p.position)) || !all(isfinite(p.velocity)) || !all(isfinite(p.normalType)))
+        {
+            Fault(32, id);
+            _Whitewater[id] = (Whitewater)0;
+            return;
+        }
+        if (p.position.w <= 0)
+        {
+            p = (Whitewater)0;
+            InterlockedAdd(_Diagnostics[7], 1);
+        }
+    }
+    if (p.position.w <= 0 && _WhitewaterEmission > 0)
+    {
+        uint seed = WhitewaterHash(id ^ ((uint)_WhitewaterStep * 747796405u));
+        Particle source = _Particles[seed % (uint)_ParticleCount];
+        float4 flow = WhitewaterFlow(source.position.xyz);
+        float3 normal;
+        float gradientSize;
+        if (WhitewaterSurface(source.position.xyz, flow.w, normal, gradientSize))
+        {
+            float speed = length(source.velocity.xyz) * _WhitewaterCellSize;
+            float strain = sqrt(dot(source.affineX.xyz, source.affineX.xyz) +
+                                dot(source.affineY.xyz, source.affineY.xyz) +
+                                dot(source.affineZ.xyz, source.affineZ.xyz));
+            float3 curl = float3(source.affineZ.y - source.affineY.z,
+                                source.affineX.z - source.affineZ.x,
+                                source.affineY.x - source.affineX.y);
+            float outgoing = dot(source.velocity.xyz, normal) * _WhitewaterCellSize;
+            float activity = saturate((speed - _WhitewaterSpeed) / max(_WhitewaterSpeed, 0.2)) *
+                saturate((strain + 0.5 * length(curl) - _WhitewaterDeformation) / 12.0) *
+                lerp(0.45, 1.0, saturate(outgoing / 2.0));
+            float probability = 1.0 - exp(-_WhitewaterEmission * activity * _WhitewaterDt);
+            if (WhitewaterRandom(seed + 17u) < probability)
+            {
+                float3 jitter = float3(WhitewaterRandom(seed + 1u), WhitewaterRandom(seed + 2u),
+                                       WhitewaterRandom(seed + 3u)) * 2.0 - 1.0;
+                float spray = outgoing > 1.2 ? 1.0 : 0.0;
+                float lifetime = _WhitewaterLifetime * lerp(0.7, 1.3, WhitewaterRandom(seed + 4u));
+                if (spray > 0.5) lifetime *= 0.6;
+                p.position = float4(source.position.xyz + _WhitewaterSpacing * (normal * 0.65 + jitter * 0.15), lifetime);
+                p.velocity = float4(source.velocity.xyz + spray * (jitter + normal) *
+                    max(speed * 0.12, 0.25) / _WhitewaterCellSize, lifetime);
+                p.normalType = float4(normal, 1.0 - spray);
+                WhitewaterBoundary(p);
+                InterlockedAdd(_Diagnostics[6], 1);
+            }
+        }
+    }
+    _Whitewater[id] = p;
+    if (p.position.w <= 0) return;
+    if (p.normalType.w > 0.5)
+    {
+        _FoamIndices.Append(id);
+        InterlockedAdd(_Diagnostics[4], 1);
+    }
+    else
+    {
+        _SprayIndices.Append(id);
+        InterlockedAdd(_Diagnostics[5], 1);
+    }
+}
+
+// Spatial counting sort by 4^3-cell blocks. Keeps particles that share grid
+// cells in the same wavefront so P2G/G2P atomics and gathers stay cache local.
+RWStructuredBuffer<uint> _SortKeys;
+RWStructuredBuffer<uint> _SortRanks;
+RWStructuredBuffer<uint> _SortBins;
+RWStructuredBuffer<Particle> _SortedParticles;
+int _SortBlocks;
+int _SortBinCount;
+
+[numthreads(128, 1, 1)]
+void ClearSortBins(uint id : SV_DispatchThreadID)
+{
+    if (id < (uint)_SortBinCount) _SortBins[id] = 0;
+}
+
+[numthreads(128, 1, 1)]
+void CountSortBins(uint id : SV_DispatchThreadID)
+{
+    if (id >= (uint)_ParticleCount) return;
+    float3 position = _Particles[id].position.xyz;
+    uint key = 0;
+    if (all(isfinite(position)))
+    {
+        int3 block = clamp((int3)floor(position * 0.25), 0, _SortBlocks - 1);
+        key = (uint)(block.x + _SortBlocks * (block.y + _SortBlocks * block.z));
+    }
+    uint rank;
+    InterlockedAdd(_SortBins[key], 1, rank);
+    _SortKeys[id] = key;
+    _SortRanks[id] = rank;
+}
+
+groupshared uint sortScan[128];
+
+[numthreads(128, 1, 1)]
+void ScanSortBins(uint id : SV_GroupThreadID)
+{
+    uint chunk = ((uint)_SortBinCount + 127) / 128;
+    uint begin = id * chunk;
+    uint end = min(begin + chunk, (uint)_SortBinCount);
+    uint total = 0;
+    for (uint i = begin; i < end; i++) total += _SortBins[i];
+    sortScan[id] = total;
+    GroupMemoryBarrierWithGroupSync();
+    for (uint offset = 1; offset < 128; offset <<= 1)
+    {
+        uint value = id >= offset ? sortScan[id - offset] : 0;
+        GroupMemoryBarrierWithGroupSync();
+        sortScan[id] += value;
+        GroupMemoryBarrierWithGroupSync();
+    }
+    uint running = sortScan[id] - total;
+    for (uint j = begin; j < end; j++)
+    {
+        uint count = _SortBins[j];
+        _SortBins[j] = running;
+        running += count;
+    }
+}
+
+[numthreads(128, 1, 1)]
+void ScatterSortedParticles(uint id : SV_DispatchThreadID)
+{
+    if (id >= (uint)_ParticleCount) return;
+    _SortedParticles[_SortBins[_SortKeys[id]] + _SortRanks[id]] = _Particles[id];
+}
+
+[numthreads(128, 1, 1)]
+void CopySortedParticles(uint id : SV_DispatchThreadID)
+{
+    if (id < (uint)_ParticleCount) _Particles[id] = _SortedParticles[id];
+}
+
+#include "PbMpm.hlsl"

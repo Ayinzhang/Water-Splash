@@ -61,9 +61,12 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Assets\MlsMpm\Tests\Editor\MlsMpmMobileValidationTests.cs" />
+    <Compile Include="Assets\MlsMpm\Tests\Editor\PbMpmTests.cs" />
+    <Compile Include="Assets\MlsMpm\Tests\Editor\BottleVoyageTests.cs" />
     <Compile Include="Assets\MlsMpm\Tests\Editor\MlsMpmWhitewaterTests.cs" />
     <Compile Include="Assets\MlsMpm\Tests\Editor\MlsMpmSurfaceTests.cs" />
     <Compile Include="Assets\MlsMpm\Tests\Editor\MlsMpmTests.cs" />
+    <Compile Include="Assets\MlsMpm\Tests\Editor\BottleBoundaryTests.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="Assets\MlsMpm\Tests\Editor\MlsMpm.Tests.asmdef" />

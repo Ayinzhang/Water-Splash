@@ -10,6 +10,7 @@ namespace WaterSplash
     public sealed class MlsMpmFluid : MonoBehaviour
     {
         public enum SurfaceQuality { Low, Medium, High }
+        public enum SolverMethod { MlsMpm, PositionBasedMpm }
 
         static readonly List<MlsMpmFluid> instances = new List<MlsMpmFluid>();
         internal static IReadOnlyList<MlsMpmFluid> ActiveInstances => instances;
@@ -62,6 +63,8 @@ namespace WaterSplash
             public double simulatedSeconds;
             public double meanKineticEnergy, meanAffineKineticEnergy, meanPotentialEnergy, meanCompressionEnergy;
             public float maximumWorldHeight, p99WorldHeight;
+            public float minimumVolumeRatio, maximumVolumeRatio;
+            public int flooredVolumeParticles;
         }
 
         public ComputeShader simulationShader;
@@ -82,9 +85,18 @@ namespace WaterSplash
         public Camera interactionCamera;
         public bool showParticles = true;
         public bool renderSurface = true;
+        [Tooltip("Individual-particle display radius in grid cells; does not affect simulation or surface reconstruction.")]
+        [Range(0.05f, 0.5f)] public float particleRadiusScale = 0.3f;
         public SurfaceQuality surfaceQuality = SurfaceQuality.Medium;
         [Range(0.6f, 1.5f)] public float surfaceRadiusScale = 0.95f;
         public bool enableWhitewater = true;
+        [Tooltip("PB-MPM only: reorder particles by 4^3 grid blocks every N ticks. MLS uses the original unsorted two-pass solver.")]
+        [Range(0, 16)] public int spatialSortInterval = 1;
+        public SolverMethod solverMethod;
+        [Range(1, 16)] public int positionIterations = 2;
+        [Range(0.1f, 2)] public float positionRelaxation = 1.5f;
+        [Range(0, 1)] public float positionViscosity = 0.01f;
+        [Range(0, 1)] public float gridVolumeBlend = 0.1f;
         [Range(512, 131072)] public int whitewaterCapacity = 32768;
         [Range(0, 30)] public float whitewaterEmissionRate = 8;
         [Range(0.2f, 8)] public float whitewaterLifetime = 2.5f;
@@ -94,6 +106,8 @@ namespace WaterSplash
         public bool showControls = true;
         public bool paused;
         [NonSerialized] public bool externalControl;
+        // Optional scene-local boundary parameters; baseline solvers leave this unset.
+        [NonSerialized] public Action<CommandBuffer, ComputeShader> configureSimulation;
 
         public const double FixedTick = 1.0 / 60.0;
         public bool IsInitialized => particles != null;
@@ -106,6 +120,7 @@ namespace WaterSplash
         public string RenderingError { get; private set; }
         public float SurfaceParticleRadius => IsInitialized ?
             CellSize * surfaceRadiusScale / Mathf.Pow(RestDensity, 1f / 3f) : 0;
+        public float DisplayParticleRadius => CellSize * particleRadiusScale;
         internal ComputeBuffer ParticleBuffer => particles;
         internal int RenderedParticleCount => activeCount;
         internal ComputeBuffer WhitewaterBuffer => whitewater;
@@ -126,10 +141,20 @@ namespace WaterSplash
         ComputeBuffer sprayIndices;
         ComputeBuffer foamArguments;
         ComputeBuffer sprayArguments;
+        ComputeBuffer sortKeys;
+        ComputeBuffer sortRanks;
+        ComputeBuffer sortBins;
+        ComputeBuffer sortedParticles;
+        readonly int[] sortKernels = new int[5];
+        int sortBlocks;
         CommandBuffer commands;
         MaterialPropertyBlock drawProperties;
         readonly int[] kernels = new int[5];
+        readonly int[] positionKernels = new int[7];
+        SolverMethod activeSolverMethod;
+        static readonly CustomSampler positionSampler = CustomSampler.Create("PB-MPM GPU/Displacement solve", true);
         readonly uint[] diagnosticData = new uint[8];
+        static readonly CustomSampler sortSampler = CustomSampler.Create("PB-MPM GPU/Spatial sort", true);
         static readonly CustomSampler[] gpuStages = {
             CustomSampler.Create("MLS-MPM GPU/Clear", true),
             CustomSampler.Create("MLS-MPM GPU/Mass + momentum", true),
@@ -212,6 +237,7 @@ namespace WaterSplash
             activeResolution = gridResolution;
             activeWhitewaterCapacity = whitewaterCapacity;
             activeDomainSize = domainSize;
+            activeSolverMethod = solverMethod;
             solver = Instantiate(simulationShader);
             solver.name = "MLS-MPM runtime solver";
             int cells = checked(gridResolution * gridResolution * gridResolution);
@@ -252,6 +278,35 @@ namespace WaterSplash
                 if (i == 0 || i == 3 || i == 4) solver.SetBuffer(kernels[i], "_Grid", grid);
                 if (i == 1 || i == 2 || i == 4) solver.SetBuffer(kernels[i], "_Particles", particles);
             }
+            string[] positionNames = { "PbPrepare", "PbProject", "PbScatter", "PbGrid", "PbGather", "PbIntegrate", "PbExportGrid" };
+            for (int i = 0; i < positionKernels.Length; i++)
+            {
+                int kernel = positionKernels[i] = solver.FindKernel(positionNames[i]);
+                solver.SetBuffer(kernel, "_Diagnostics", diagnostics);
+                if (i != 3 && i != 6) solver.SetBuffer(kernel, "_Particles", particles);
+                if (i == 2 || i == 3) solver.SetBuffer(kernel, "_Accumulation", accumulation);
+                if (i == 3 || i == 4 || i == 6) solver.SetBuffer(kernel, "_Grid", grid);
+            }
+            sortBlocks = (gridResolution + 3) / 4;
+            sortKeys = new ComputeBuffer(particleCount, sizeof(uint));
+            sortRanks = new ComputeBuffer(particleCount, sizeof(uint));
+            sortBins = new ComputeBuffer(sortBlocks * sortBlocks * sortBlocks, sizeof(uint));
+            sortedParticles = new ComputeBuffer(particleCount, Marshal.SizeOf<ParticleState>());
+            string[] sortNames = { "ClearSortBins", "CountSortBins", "ScanSortBins", "ScatterSortedParticles", "CopySortedParticles" };
+            for (int i = 0; i < sortKernels.Length; i++)
+            {
+                sortKernels[i] = solver.FindKernel(sortNames[i]);
+                solver.SetBuffer(sortKernels[i], "_SortBins", sortBins);
+                if (i != 0 && i != 2)
+                {
+                    solver.SetBuffer(sortKernels[i], "_Particles", particles);
+                    solver.SetBuffer(sortKernels[i], "_SortKeys", sortKeys);
+                    solver.SetBuffer(sortKernels[i], "_SortRanks", sortRanks);
+                    solver.SetBuffer(sortKernels[i], "_SortedParticles", sortedParticles);
+                }
+            }
+            solver.SetInt("_SortBlocks", sortBlocks);
+            solver.SetInt("_SortBinCount", sortBlocks * sortBlocks * sortBlocks);
             whitewater = new ComputeBuffer(activeWhitewaterCapacity, Marshal.SizeOf<WhitewaterState>());
             foamIndices = new ComputeBuffer(activeWhitewaterCapacity, sizeof(uint), ComputeBufferType.Append);
             sprayIndices = new ComputeBuffer(activeWhitewaterCapacity, sizeof(uint), ComputeBufferType.Append);
@@ -311,6 +366,8 @@ namespace WaterSplash
                 error = "Assign the MLS-MPM compute shader.";
             else if (showParticles && !renderSurface && (particleMaterial == null || !particleMaterial.shader.isSupported))
                 error = "Assign a supported MLS-MPM particle material.";
+            else if (!Finite(particleRadiusScale) || particleRadiusScale <= 0)
+                error = "Particle display radius must be finite and positive.";
             else if (particleCount < 512 || particleCount > 262144 || gridResolution < 16 || gridResolution > 96)
                 error = "Particle count must be 512..262144 and grid resolution 16..96.";
             else if (!Finite(domainSize) || domainSize <= 0 || !Finite(soundSpeed) || soundSpeed <= 0 ||
@@ -321,6 +378,12 @@ namespace WaterSplash
                 error = "Domain, sound speed, viscosity and gravity must be finite, with positive domain and sound speed.";
             else if (substeps < 1 || substeps > 32 || maxCatchUpTicks < 1 || maxCatchUpTicks > 8)
                 error = "Substeps must be 1..32 and maximum catch-up ticks 1..8.";
+            else if (!Enum.IsDefined(typeof(SolverMethod), solverMethod) ||
+                     positionIterations < 1 || positionIterations > 16 ||
+                     !Finite(positionRelaxation) || positionRelaxation < 0.1f || positionRelaxation > 2 ||
+                     !Finite(positionViscosity) || positionViscosity < 0 || positionViscosity > 1 ||
+                     !Finite(gridVolumeBlend) || gridVolumeBlend < 0 || gridVolumeBlend > 1)
+                error = "PB-MPM needs 1..16 iterations, relaxation 0.1..2 and viscosity/volume blend 0..1.";
             else if (whitewaterCapacity < 512 || whitewaterCapacity > 131072 ||
                      !Finite(whitewaterEmissionRate) || whitewaterEmissionRate < 0 ||
                      !Finite(whitewaterLifetime) || whitewaterLifetime <= 0 || whitewaterLifetime > 30 ||
@@ -351,9 +414,9 @@ namespace WaterSplash
             if (!externalControl && Input.GetKeyDown(KeyCode.R)) { Initialize(); return; }
             if (!IsInitialized || Error != null) return;
             if (particleCount != activeCount || gridResolution != activeResolution ||
-                domainSize != activeDomainSize || whitewaterCapacity != activeWhitewaterCapacity)
+                domainSize != activeDomainSize || whitewaterCapacity != activeWhitewaterCapacity || solverMethod != activeSolverMethod)
             {
-                Fail("Particle count, grid, domain or whitewater capacity changed. Press Reset to rebuild GPU buffers.");
+                Fail("Solver, particle count, grid, domain or whitewater capacity changed. Press Reset to rebuild GPU buffers.");
                 return;
             }
             if (!ValidateConfiguration(out string error))
@@ -390,10 +453,11 @@ namespace WaterSplash
             if (substeps < 1 || substeps > 32) throw new ArgumentOutOfRangeException(nameof(substeps));
             if (Error != null) throw new InvalidOperationException(Error);
             if (particleCount != activeCount || gridResolution != activeResolution ||
-                domainSize != activeDomainSize || whitewaterCapacity != activeWhitewaterCapacity)
-                throw new InvalidOperationException("Reset after changing particle count, grid, domain or whitewater capacity.");
+                domainSize != activeDomainSize || whitewaterCapacity != activeWhitewaterCapacity || solverMethod != activeSolverMethod)
+                throw new InvalidOperationException("Reset after changing solver, particle count, grid, domain or whitewater capacity.");
             if (!ValidateConfiguration(out string error)) throw new ArgumentException(error);
             commands.Clear();
+            configureSimulation?.Invoke(commands, solver);
             float dt = (float)(FixedTick / substeps);
             float h = CellSize;
             float soundInCells = soundSpeed / h;
@@ -407,6 +471,9 @@ namespace WaterSplash
             commands.SetComputeFloatParam(solver, "_Viscosity", viscosity);
             commands.SetComputeFloatParam(solver, "_AffineRetention", Mathf.Exp(-affineDamping * dt));
             commands.SetComputeFloatParam(solver, "_DivergenceRetention", Mathf.Exp(-divergenceDamping * dt));
+            commands.SetComputeFloatParam(solver, "_PbRelaxation", positionRelaxation);
+            commands.SetComputeFloatParam(solver, "_PbViscosity", positionViscosity);
+            commands.SetComputeFloatParam(solver, "_PbVolumeBlend", gridVolumeBlend);
             commands.SetComputeFloatParam(solver, "_WhitewaterDt", (float)FixedTick);
             commands.SetComputeFloatParam(solver, "_WhitewaterCellSize", h);
             commands.SetComputeFloatParam(solver, "_WhitewaterSpacing", 1f / Mathf.Pow(RestDensity, 1f / 3f));
@@ -432,6 +499,17 @@ namespace WaterSplash
                 Vector3 acceleration = gravity;
                 if (SimulatedSeconds < kickUntil) acceleration += new Vector3(12, 3, 0);
                 commands.SetComputeVectorParam(solver, "_Acceleration", acceleration / h);
+                if (solverMethod == SolverMethod.PositionBasedMpm && spatialSortInterval > 0 && whitewaterStep % spatialSortInterval == 0)
+                {
+                    commands.BeginSample(sortSampler);
+                    int binGroups = (sortBlocks * sortBlocks * sortBlocks + 127) / 128;
+                    commands.DispatchCompute(solver, sortKernels[0], binGroups, 1, 1);
+                    commands.DispatchCompute(solver, sortKernels[1], particleGroups, 1, 1);
+                    commands.DispatchCompute(solver, sortKernels[2], 1, 1, 1);
+                    commands.DispatchCompute(solver, sortKernels[3], particleGroups, 1, 1);
+                    commands.DispatchCompute(solver, sortKernels[4], particleGroups, 1, 1);
+                    commands.EndSample(sortSampler);
+                }
                 for (int step = 0; step < substeps; step++)
                 {
                     // Sweep the collider through the tick instead of teleporting it to
@@ -439,7 +517,24 @@ namespace WaterSplash
                     Vector3 substepSphere = Vector3.Lerp(sphereStart, sphere, (step + 1f) / substeps);
                     commands.SetComputeVectorParam(solver, "_Sphere", new Vector4(substepSphere.x, substepSphere.y,
                         substepSphere.z, sphereObstacle == null ? 0 : sphereRadius / h));
-                    for (int stage = 0; stage < kernels.Length; stage++)
+                    if (solverMethod == SolverMethod.PositionBasedMpm)
+                    {
+                        commands.BeginSample(positionSampler);
+                        commands.DispatchCompute(solver, positionKernels[0], particleGroups, 1, 1);
+                        for (int iteration = 0; iteration < positionIterations; iteration++)
+                        {
+                            commands.DispatchCompute(solver, positionKernels[1], particleGroups, 1, 1);
+                            commands.DispatchCompute(solver, kernels[0], cellGroups, 1, 1);
+                            commands.DispatchCompute(solver, positionKernels[2], particleGroups, 1, 1);
+                            commands.DispatchCompute(solver, positionKernels[3], cellGroups, 1, 1);
+                            commands.DispatchCompute(solver, positionKernels[4], particleGroups, 1, 1);
+                        }
+                        commands.DispatchCompute(solver, positionKernels[5], particleGroups, 1, 1);
+                        if (step == substeps - 1)
+                            commands.DispatchCompute(solver, positionKernels[6], cellGroups, 1, 1);
+                        commands.EndSample(positionSampler);
+                    }
+                    else for (int stage = 0; stage < kernels.Length; stage++)
                     {
                         commands.BeginSample(gpuStages[stage]);
                         commands.DispatchCompute(solver, kernels[stage],
@@ -486,7 +581,7 @@ namespace WaterSplash
             if (drawingMaterial == null) return;
             drawProperties.SetVector("_Origin", GridOrigin);
             drawProperties.SetFloat("_CellSize", CellSize);
-            drawProperties.SetFloat("_Radius", CellSize * 0.3f);
+            drawProperties.SetFloat("_Radius", DisplayParticleRadius);
             var bounds = new Bounds(transform.position + Vector3.one * (domainSize * 0.5f),
                                     Vector3.one * (domainSize + CellSize));
             Graphics.DrawProcedural(drawingMaterial, bounds, MeshTopology.Triangles, 6, activeCount,
@@ -495,6 +590,16 @@ namespace WaterSplash
 
         internal void MarkSurfaceRendered()
         {
+            lastSurfaceFrame = Time.frameCount;
+            RenderingError = null;
+        }
+
+        public void SetSurfaceRendering(bool enabled)
+        {
+            if (renderSurface == enabled) return;
+            renderSurface = enabled;
+            // A returning surface pass gets a frame to render before the
+            // missing-feature watchdog checks its previous render timestamp.
             lastSurfaceFrame = Time.frameCount;
             RenderingError = null;
         }
@@ -689,6 +794,7 @@ namespace WaterSplash
                 particleCount = activeCount, faults = diagnosticData[0],
                 peakDensityRatio = diagnosticData[1] / 1024f,
                 simulatedSeconds = SimulatedSeconds,
+                minimumVolumeRatio = solverMethod == SolverMethod.PositionBasedMpm ? float.PositiveInfinity : 0,
                 minimum = Vector3.one * float.PositiveInfinity,
                 maximum = Vector3.one * float.NegativeInfinity
             };
@@ -698,6 +804,13 @@ namespace WaterSplash
             int heightIndex = 0;
             foreach (ParticleState state in states)
             {
+                if (solverMethod == SolverMethod.PositionBasedMpm)
+                {
+                    float volume = state.affineX.w == 0 ? 1 : state.affineX.w;
+                    result.minimumVolumeRatio = Mathf.Min(result.minimumVolumeRatio, volume);
+                    result.maximumVolumeRatio = Mathf.Max(result.maximumVolumeRatio, volume);
+                    if (volume <= 0.10001f) result.flooredVolumeParticles++;
+                }
                 Vector3 p = state.position;
                 Vector3 v = state.velocity;
                 if (!Finite(state.position) || !Finite(state.velocity) || !Finite(state.affineX) ||
@@ -714,13 +827,15 @@ namespace WaterSplash
                 float worldY = GridOrigin.y + p.y * CellSize;
                 heights[heightIndex++] = worldY;
                 result.meanKineticEnergy += .5 * v.sqrMagnitude * CellSize * CellSize / activeCount;
-                double affineNorm = state.affineX.sqrMagnitude + state.affineY.sqrMagnitude + state.affineZ.sqrMagnitude;
+                double affineNorm = ((Vector3)state.affineX).sqrMagnitude + ((Vector3)state.affineY).sqrMagnitude +
+                    ((Vector3)state.affineZ).sqrMagnitude;
                 result.meanAffineKineticEnergy += .125 * affineNorm * CellSize * CellSize / activeCount;
                 result.meanPotentialEnergy += -gravity.y * (worldY - transform.position.y) / activeCount;
                 double ratio = Math.Max(1, state.velocity.w);
                 double stored = pressureExponent == 1 ? Math.Log(ratio) + 1 / ratio - 1 :
                     (Math.Pow(ratio, pressureExponent - 1) - 1) / (pressureExponent - 1) + 1 / ratio - 1;
-                result.meanCompressionEnergy += soundSpeed * soundSpeed / pressureExponent * stored / activeCount;
+                if (solverMethod == SolverMethod.MlsMpm)
+                    result.meanCompressionEnergy += soundSpeed * soundSpeed / pressureExponent * stored / activeCount;
             }
             Array.Sort(heights);
             result.maximumWorldHeight = heights[heights.Length - 1];
@@ -740,7 +855,8 @@ namespace WaterSplash
             float scale = GuiScale();
             GUI.matrix = Matrix4x4.Scale(new Vector3(scale, scale, 1));
             GUILayout.BeginArea(new Rect(12, 12, Screen.width / scale - 24, 215), GUI.skin.box);
-            GUILayout.Label("3D weakly compressible MLS-MPM | " + SystemInfo.graphicsDeviceType + " | " + SystemInfo.graphicsDeviceName);
+            GUILayout.Label((solverMethod == SolverMethod.MlsMpm ? "Weakly compressible MLS-MPM" : "PB-MPM | " + positionIterations + " iterations") +
+                " | " + SystemInfo.graphicsDeviceType + " | " + SystemInfo.graphicsDeviceName);
             GUILayout.Label(string.Format("{0:N0} particles | {1}^3 grid | {2} substeps | frame {3:F1} ms ({4:F0} FPS)",
                 activeCount, activeResolution, substeps, averageFrame * 1000, averageFrame > 0 ? 1 / averageFrame : 0));
             GUILayout.Label(string.Format("Simulated {0:F2}s | backlog {1:F2}s | peak density {2:F2}x | peak speed {3:F2}m/s",
@@ -751,14 +867,17 @@ namespace WaterSplash
             GUILayout.BeginHorizontal();
             if (GUILayout.Button(paused ? "Run" : "Pause", GUILayout.Height(30))) paused = !paused;
             if (GUILayout.Button("Reset", GUILayout.Height(30))) Initialize();
+            if (GUILayout.Button(solverMethod == SolverMethod.MlsMpm ? "Try PB-MPM" : "Try MLS-MPM", GUILayout.Height(30)))
+            {
+                solverMethod = solverMethod == SolverMethod.MlsMpm ? SolverMethod.PositionBasedMpm : SolverMethod.MlsMpm;
+                Initialize();
+            }
             if (GUILayout.Button("Push", GUILayout.Height(30))) Kick();
             if (GUILayout.Button(showParticles ? "Rendering ON" : "Rendering OFF", GUILayout.Height(30)))
                 showParticles = !showParticles;
             if (GUILayout.Button(renderSurface ? "Surface" : "Particles", GUILayout.Height(30)))
             {
-                renderSurface = !renderSurface;
-                RenderingError = null;
-                lastSurfaceFrame = Time.frameCount;
+                SetSurfaceRendering(!renderSurface);
             }
             if (renderSurface && GUILayout.Button("Water: " + surfaceQuality, GUILayout.Height(30)))
                 surfaceQuality = (SurfaceQuality)(((int)surfaceQuality + 1) % 3);
@@ -800,6 +919,11 @@ namespace WaterSplash
             foamArguments?.Release();
             sprayArguments?.Release();
             commands?.Release();
+            sortKeys?.Release();
+            sortRanks?.Release();
+            sortBins?.Release();
+            sortedParticles?.Release();
+            sortKeys = sortRanks = sortBins = sortedParticles = null;
             particles = null;
             accumulation = null;
             grid = null;

@@ -58,6 +58,11 @@ namespace WaterSplash.Tests
                 var surface = Shader.GetGlobalTexture("_FluidDepth") as RenderTexture;
                 Assert.That(surface, Is.Not.Null);
                 Assert.That(surface.graphicsFormat, Is.EqualTo(GraphicsFormat.R32G32_SFloat));
+                var foamField = Shader.GetGlobalTexture("_FluidFoam") as RenderTexture;
+                Assert.That(foamField, Is.Not.Null);
+                Assert.That(foamField.graphicsFormat, Is.EqualTo(
+                    Shader.GetGlobalFloat("_DetailedWhitewater") > .5f ?
+                    GraphicsFormat.R16G16_SFloat : GraphicsFormat.R16_SFloat));
                 readback = new Texture2D(surface.width, surface.height, TextureFormat.RGFloat, false, true);
                 RenderTexture.active = surface;
                 readback.ReadPixels(new Rect(0, 0, surface.width, surface.height), 0, 0);
@@ -89,6 +94,173 @@ namespace WaterSplash.Tests
             Assert.That(shader, Is.Not.Null);
             Assert.That(shader.isSupported, Is.True);
             Assert.That(ShaderUtil.GetShaderMessages(shader), Is.Empty);
+        }
+
+        [Test]
+        public void DetailedWhitewaterIsOptInAndEnabledOnlyForTheBottleRenderer()
+        {
+            var feature = ScriptableObject.CreateInstance<MlsMpmSurfaceFeature>();
+            try { Assert.That(feature.detailedWhitewater, Is.False); }
+            finally { Object.DestroyImmediate(feature); }
+            foreach (string path in new[] {
+                "Assets/MlsMpm/BottleDemo/Settings/BottleRenderer.asset",
+                "Assets/MlsMpm/MobileValidation/Settings/AndroidRenderer.asset"
+            })
+            {
+                var renderer = AssetDatabase.LoadAssetAtPath<UniversalRendererData>(path);
+                Assert.That(renderer, Is.Not.Null, path);
+                bool found = false;
+                foreach (var rendererFeature in renderer.rendererFeatures)
+                {
+                    if (!(rendererFeature is MlsMpmSurfaceFeature water)) continue;
+                    found = true;
+                    Assert.That(water.detailedWhitewater, Is.EqualTo(path.Contains("BottleDemo")), path);
+                }
+                Assert.That(found, Is.True, path);
+            }
+        }
+
+        [Test]
+        public void DetailedFoamAddsHolesWithoutChangingSeedDensity()
+        {
+            Color[] original = RenderWhitewater(false, true, Vector3.zero);
+            Color[] detailed = RenderWhitewater(true, true, Vector3.zero);
+            int holes = 0, rims = 0, interior = 0;
+            for (int i = 0; i < original.Length; i++)
+            {
+                Assert.That(detailed[i].r, Is.EqualTo(original[i].r).Within(.001));
+                if (detailed[i].r < .1f) continue;
+                interior++;
+                float detail = detailed[i].g / detailed[i].r;
+                if (detail < .1f) holes++;
+                if (detail > .65f) rims++;
+            }
+            Assert.That(interior, Is.GreaterThan(100));
+            Assert.That(holes, Is.GreaterThan(10), "Sparse foam must contain actual gaps, not just brighter noise.");
+            Assert.That(rims, Is.GreaterThan(10));
+        }
+
+        [Test]
+        public void FoamDetailMovesWithTheSeedAndOpensAsItAges()
+        {
+            const int size = 128, shift = 16;
+            Color[] young = RenderWhitewater(true, true, Vector3.zero, .2f);
+            Color[] moved = RenderWhitewater(true, true, new Vector3(.25f, 0, 0), .2f);
+            Color[] old = RenderWhitewater(true, true, Vector3.zero, .8f);
+            float youngDetail = 0, oldDetail = 0;
+            int samples = 0;
+            for (int y = 0; y < size; y++)
+            for (int x = 0; x < size - shift; x++)
+            {
+                int i = y * size + x;
+                if (young[i].r < .1f) continue;
+                Assert.That(moved[i + shift].g, Is.EqualTo(young[i].g).Within(.004),
+                    "Foam detail must translate with its seed rather than sample stationary world noise.");
+                youngDetail += young[i].g / young[i].r;
+                oldDetail += old[i].g / Mathf.Max(old[i].r, .0001f);
+                samples++;
+            }
+            Assert.That(samples, Is.GreaterThan(100));
+            Assert.That(oldDetail / samples, Is.LessThan(youngDetail / samples - .05f));
+        }
+
+        [Test]
+        public void DetailedSprayIsTranslucentStretchedAndOccludedByWater()
+        {
+            Color[] original = RenderWhitewater(false, false, Vector3.zero);
+            Color[] detailed = RenderWhitewater(true, false, Vector3.zero);
+            Color[] submerged = RenderWhitewater(true, false, Vector3.zero, .2f, 1.5f);
+            double originalEnergy = 0, detailedEnergy = 0, hiddenEnergy = 0;
+            int minX = 128, maxX = -1, minY = 128, maxY = -1;
+            for (int i = 0; i < original.Length; i++)
+            {
+                originalEnergy += original[i].r + original[i].g + original[i].b;
+                detailedEnergy += detailed[i].r + detailed[i].g + detailed[i].b;
+                hiddenEnergy += submerged[i].r + submerged[i].g + submerged[i].b;
+                if (detailed[i].b < .003f) continue;
+                minX = Mathf.Min(minX, i % 128); maxX = Mathf.Max(maxX, i % 128);
+                minY = Mathf.Min(minY, i / 128); maxY = Mathf.Max(maxY, i / 128);
+            }
+            Assert.That(detailedEnergy, Is.GreaterThan(1));
+            Assert.That(detailedEnergy, Is.LessThan(originalEnergy * .75), "Spray must no longer resemble opaque white beads.");
+            Assert.That(maxX - minX, Is.GreaterThan((maxY - minY) * 2));
+            Assert.That(hiddenEnergy, Is.LessThan(.001), "Spray behind the visible water surface must not show through it.");
+        }
+
+        static Color[] RenderWhitewater(bool detailed, bool foam, Vector3 offset, float age = .2f, float waterDepth = 2)
+        {
+            if (!SystemInfo.supportsComputeShaders ||
+                !SystemInfo.IsFormatSupported(GraphicsFormat.R16G16_SFloat, FormatUsage.Blend))
+                Assert.Ignore("Structured buffers and RG16 float additive blending are required.");
+            const int size = 128;
+            var states = new ComputeBuffer(1, 48);
+            var indices = new ComputeBuffer(1, sizeof(uint));
+            var surface = new Texture2D(1, 1, TextureFormat.RFloat, false, true);
+            var scene = new Texture2D(1, 1, TextureFormat.RFloat, false, true);
+            var target = new RenderTexture(size, size, 24, foam ? RenderTextureFormat.RGHalf : RenderTextureFormat.ARGBFloat);
+            var readback = new Texture2D(size, size, TextureFormat.RGBAFloat, false, true);
+            var material = new Material(Shader.Find("Hidden/WaterSplash/Surface Particles"));
+            var commands = new CommandBuffer();
+            RenderTexture previous = RenderTexture.active;
+            Texture previousDepth = Shader.GetGlobalTexture("_CameraDepthTexture");
+            Texture previousFluidDepth = Shader.GetGlobalTexture("_FluidDepth");
+            Vector4 previousOrtho = Shader.GetGlobalVector("unity_OrthoParams");
+            Vector4 previousProjection = Shader.GetGlobalVector("_ProjectionParams");
+            Vector4 previousScreen = Shader.GetGlobalVector("_ScaledScreenParams");
+            Vector4 previousSize = Shader.GetGlobalVector("_FluidBufferSize");
+            float previousContinuous = Shader.GetGlobalFloat("_ContinuousFoam");
+            float previousDetailed = Shader.GetGlobalFloat("_DetailedWhitewater");
+            try
+            {
+                states.SetData(new[] { new MlsMpmFluid.WhitewaterState {
+                    position = new Vector4(offset.x, offset.y, -2 + offset.z, 1 - age),
+                    velocity = new Vector4(foam ? 0 : 4, 0, 0, 1),
+                    normalType = new Vector4(0, 0, 1, foam ? 1 : 0)
+                } });
+                indices.SetData(new uint[] { 0 });
+                surface.SetPixelData(new[] { waterDepth }, 0); surface.Apply();
+                scene.SetPixelData(new[] { SystemInfo.usesReversedZBuffer ? 0f : 1f }, 0); scene.Apply();
+                target.Create();
+                material.SetBuffer("_Whitewater", states);
+                material.SetBuffer("_WhitewaterIndices", indices);
+                material.SetVector("_Origin", Vector3.zero);
+                material.SetFloat("_CellSize", 1);
+                material.SetFloat("_WhitewaterRadius", foam ? .16f : .22f);
+                material.SetFloat("_WhitewaterDepthTolerance", .5f);
+                commands.SetViewProjectionMatrices(Matrix4x4.identity,
+                    GL.GetGPUProjectionMatrix(Matrix4x4.Ortho(-1, 1, -1, 1, .1f, 10), true));
+                commands.SetGlobalVector("unity_OrthoParams", new Vector4(2, 2, 0, 1));
+                commands.SetGlobalVector("_ProjectionParams", new Vector4(1, .1f, 10, .1f));
+                commands.SetGlobalVector("_ScaledScreenParams", new Vector4(size, size, 1 + 1f / size, 1 + 1f / size));
+                commands.SetGlobalVector("_FluidBufferSize", new Vector4(size, size, 1f / size, 1f / size));
+                commands.SetGlobalFloat("_ContinuousFoam", 1);
+                commands.SetGlobalFloat("_DetailedWhitewater", detailed ? 1 : 0);
+                commands.SetGlobalTexture("_FluidDepth", surface);
+                commands.SetGlobalTexture("_CameraDepthTexture", scene);
+                commands.SetRenderTarget(target);
+                commands.ClearRenderTarget(true, true, Color.clear);
+                commands.DrawProcedural(Matrix4x4.identity, material, foam ? 2 : 3, MeshTopology.Triangles, 6, 1);
+                Graphics.ExecuteCommandBuffer(commands);
+                RenderTexture.active = target;
+                readback.ReadPixels(new Rect(0, 0, size, size), 0, 0);
+                readback.Apply();
+                return readback.GetPixels();
+            }
+            finally
+            {
+                RenderTexture.active = previous;
+                Shader.SetGlobalTexture("_CameraDepthTexture", previousDepth);
+                Shader.SetGlobalTexture("_FluidDepth", previousFluidDepth);
+                Shader.SetGlobalVector("unity_OrthoParams", previousOrtho);
+                Shader.SetGlobalVector("_ProjectionParams", previousProjection);
+                Shader.SetGlobalVector("_ScaledScreenParams", previousScreen);
+                Shader.SetGlobalVector("_FluidBufferSize", previousSize);
+                Shader.SetGlobalFloat("_ContinuousFoam", previousContinuous);
+                Shader.SetGlobalFloat("_DetailedWhitewater", previousDetailed);
+                states.Release(); indices.Release(); commands.Release(); target.Release();
+                Object.DestroyImmediate(surface); Object.DestroyImmediate(scene);
+                Object.DestroyImmediate(target); Object.DestroyImmediate(readback); Object.DestroyImmediate(material);
+            }
         }
 
         [Test]

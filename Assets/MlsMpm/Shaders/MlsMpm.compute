@@ -6,6 +6,18 @@
 #pragma kernel ClearWhitewater
 #pragma kernel ClearWhitewaterCounts
 #pragma kernel UpdateWhitewater
+#pragma kernel ClearSortBins
+#pragma kernel CountSortBins
+#pragma kernel ScanSortBins
+#pragma kernel ScatterSortedParticles
+#pragma kernel CopySortedParticles
+#pragma kernel PbPrepare
+#pragma kernel PbProject
+#pragma kernel PbScatter
+#pragma kernel PbGrid
+#pragma kernel PbGather
+#pragma kernel PbIntegrate
+#pragma kernel PbExportGrid
 
 #include "MlsMpmWhitewater.hlsl"
 
@@ -502,3 +514,78 @@ void UpdateWhitewater(uint id : SV_DispatchThreadID)
         InterlockedAdd(_Diagnostics[5], 1);
     }
 }
+
+// Spatial counting sort by 4^3-cell blocks. Keeps particles that share grid
+// cells in the same wavefront so P2G/G2P atomics and gathers stay cache local.
+RWStructuredBuffer<uint> _SortKeys;
+RWStructuredBuffer<uint> _SortRanks;
+RWStructuredBuffer<uint> _SortBins;
+RWStructuredBuffer<Particle> _SortedParticles;
+int _SortBlocks;
+int _SortBinCount;
+
+[numthreads(128, 1, 1)]
+void ClearSortBins(uint id : SV_DispatchThreadID)
+{
+    if (id < (uint)_SortBinCount) _SortBins[id] = 0;
+}
+
+[numthreads(128, 1, 1)]
+void CountSortBins(uint id : SV_DispatchThreadID)
+{
+    if (id >= (uint)_ParticleCount) return;
+    float3 position = _Particles[id].position.xyz;
+    uint key = 0;
+    if (all(isfinite(position)))
+    {
+        int3 block = clamp((int3)floor(position * 0.25), 0, _SortBlocks - 1);
+        key = (uint)(block.x + _SortBlocks * (block.y + _SortBlocks * block.z));
+    }
+    uint rank;
+    InterlockedAdd(_SortBins[key], 1, rank);
+    _SortKeys[id] = key;
+    _SortRanks[id] = rank;
+}
+
+groupshared uint sortScan[128];
+
+[numthreads(128, 1, 1)]
+void ScanSortBins(uint id : SV_GroupThreadID)
+{
+    uint chunk = ((uint)_SortBinCount + 127) / 128;
+    uint begin = id * chunk;
+    uint end = min(begin + chunk, (uint)_SortBinCount);
+    uint total = 0;
+    for (uint i = begin; i < end; i++) total += _SortBins[i];
+    sortScan[id] = total;
+    GroupMemoryBarrierWithGroupSync();
+    for (uint offset = 1; offset < 128; offset <<= 1)
+    {
+        uint value = id >= offset ? sortScan[id - offset] : 0;
+        GroupMemoryBarrierWithGroupSync();
+        sortScan[id] += value;
+        GroupMemoryBarrierWithGroupSync();
+    }
+    uint running = sortScan[id] - total;
+    for (uint j = begin; j < end; j++)
+    {
+        uint count = _SortBins[j];
+        _SortBins[j] = running;
+        running += count;
+    }
+}
+
+[numthreads(128, 1, 1)]
+void ScatterSortedParticles(uint id : SV_DispatchThreadID)
+{
+    if (id >= (uint)_ParticleCount) return;
+    _SortedParticles[_SortBins[_SortKeys[id]] + _SortRanks[id]] = _Particles[id];
+}
+
+[numthreads(128, 1, 1)]
+void CopySortedParticles(uint id : SV_DispatchThreadID)
+{
+    if (id < (uint)_ParticleCount) _Particles[id] = _SortedParticles[id];
+}
+
+#include "PbMpm.hlsl"

@@ -29,6 +29,7 @@ Shader "Hidden/WaterSplash/Surface Particles"
         float _WhitewaterRadius;
         float _WhitewaterDepthTolerance;
         float _ContinuousFoam;
+        float _DetailedWhitewater;
 
         struct ParticleVaryings
         {
@@ -90,6 +91,8 @@ Shader "Hidden/WaterSplash/Surface Particles"
             float2 disk : TEXCOORD0;
             float3 centerVS : TEXCOORD1;
             float2 radiusFade : TEXCOORD2;
+            float4 detail : TEXCOORD3;
+            float3 billboardVS : TEXCOORD4;
         };
 
         WhitewaterVaryings WhitewaterVertex(uint vertex : SV_VertexID, uint instance : SV_InstanceID)
@@ -107,8 +110,11 @@ Shader "Hidden/WaterSplash/Surface Particles"
             bool foam = p.normalType.w > 0.5;
             float radius = _WhitewaterRadius * (foam ?
                 lerp(lerp(1.4, 2.8, random), lerp(2.8, 4.3, random), _ContinuousFoam) : lerp(0.25, 0.6, random));
+            if (!foam && _DetailedWhitewater > .5) radius *= .75;
             output.centerVS = TransformWorldToView(_Origin + _CellSize * p.position.xyz);
             output.disk = corners[vertex];
+            output.detail = float4(random * 31, WhitewaterRandom(id + 193u) * 31,
+                saturate(1 - p.position.w / max(p.velocity.w, .001)), random);
             output.radiusFade = float2(radius, saturate((p.velocity.w - p.position.w) / 0.1) *
                 saturate(p.position.w / 0.5));
             if (-output.centerVS.z < _ProjectionParams.y + radius) return output;
@@ -122,15 +128,62 @@ Shader "Hidden/WaterSplash/Surface Particles"
                 float3 tangent = dot(flow, flow) > 0.01 ? normalize(flow) :
                     normalize(cross(n, abs(n.y) < .9 ? float3(0,1,0) : float3(1,0,0)));
                 float3 bitangent = cross(n, tangent);
+                if (_DetailedWhitewater > .5)
+                {
+                    // A seeded surface frame carries detail with the seed instead of swimming through world noise.
+                    tangent = normalize(cross(n, abs(n.y) < .9 ? float3(0,1,0) : float3(1,0,0)));
+                    bitangent = cross(n, tangent);
+                    float angle = random * 6.2831853;
+                    tangent = tangent * cos(angle) + bitangent * sin(angle);
+                    bitangent = cross(n, tangent);
+                }
+                float3 offset = radius * (output.disk.x * tangent * 1.65 + output.disk.y * bitangent * .85);
+                if (_DetailedWhitewater > .5)
+                {
+                    float speed = length(flow) * _CellSize;
+                    float3 direction = flow / max(length(flow), .1);
+                    offset += direction * dot(offset, direction) * saturate(speed * .3);
+                }
                 float3 surfaceOffset = mul((float3x3)UNITY_MATRIX_V,
-                    radius * (output.disk.x * tangent * 1.65 + output.disk.y * bitangent * .85));
+                    offset);
                 billboard = lerp(billboard * .7, surfaceOffset, .85);
             }
+            else if (!foam && _DetailedWhitewater > .5)
+            {
+                float3 velocityVS = mul((float3x3)UNITY_MATRIX_V, p.velocity.xyz * _CellSize);
+                float speed = length(velocityVS.xy);
+                float2 direction = velocityVS.xy / max(speed, .001);
+                billboard.xy += direction * dot(billboard.xy, direction) * min(speed * .65, 2.5);
+            }
+            output.billboardVS = billboard;
             output.positionCS = mul(UNITY_MATRIX_P, float4(output.centerVS + billboard, 1));
             return output;
         }
 
-        float FoamMask(WhitewaterVaryings input) : SV_Target
+        float BubbleRims(float2 p, float age)
+        {
+            float2 cell = floor(p), f = frac(p);
+            float nearest = 10;
+            [unroll] for (int y = -1; y <= 1; y++)
+            [unroll] for (int x = -1; x <= 1; x++)
+            {
+                float2 offset = float2(x, y);
+                float3 hash = frac(float3(cell + offset, (cell.x + offset.x) + (cell.y + offset.y)) *
+                    float3(.1031, .1030, .0973));
+                hash += dot(hash, hash.yxz + 33.33);
+                float2 random = frac((hash.xx + hash.yz) * hash.zy);
+                float2 delta = offset + .25 + random * .5 - f;
+                nearest = min(nearest, length(delta) / lerp(.28, .46, random.x));
+            }
+            float aa = max(fwidth(nearest), .04);
+            float hole = lerp(.55, .91, age);
+            float ring = smoothstep(hole - aa, hole + aa, nearest) *
+                (1 - smoothstep(1.06 - aa, 1.06 + aa, nearest));
+            // Unresolved bubbles become average coverage rather than sparkling subpixel rings.
+            return lerp(ring, .32, saturate((aa - .25) * 2));
+        }
+
+        float2 FoamMask(WhitewaterVaryings input) : SV_Target
         {
             float r2 = dot(input.disk, input.disk);
             clip(1.0 - r2);
@@ -142,7 +195,15 @@ Shader "Hidden/WaterSplash/Surface Particles"
             clip(SceneEyeDepth(uv) + input.centerVS.z + input.radiusFade.x);
             float falloff = saturate(1.0 - r2);
             float kernel = lerp(falloff * falloff * .55, exp(-3.5 * r2) * .42, _ContinuousFoam);
-            return input.radiusFade.y * depthFade * kernel;
+            float density = input.radiusFade.y * depthFade * kernel;
+            float detail = 1;
+            if (_DetailedWhitewater > .5)
+            {
+                float2 p = input.disk * lerp(2.8, 4.2, input.detail.w) + input.detail.xy;
+                detail = lerp(BubbleRims(p, input.detail.z),
+                    BubbleRims(p * 2.17 + 7.3, input.detail.z), .35);
+            }
+            return float2(density, density * detail);
         }
 
         struct SprayOutput
@@ -161,6 +222,25 @@ Shader "Hidden/WaterSplash/Surface Particles"
             output.color = half4(float3(0.92, 0.96, 1.0) * (0.7 + 0.3 * hemisphere),
                 input.radiusFade.y * smoothstep(1.0, 0.15, r2) * 0.85);
             output.depth = FluidDeviceDepth(surface);
+            if (_DetailedWhitewater > .5)
+            {
+                surface = input.centerVS + input.billboardVS + float3(0, 0, hemisphere * input.radiusFade.x);
+                float eyeDepth = -surface.z;
+                float2 uv = GetNormalizedScreenSpaceUV(input.positionCS);
+                float softRange = max(input.radiusFade.x * 2, .003);
+                float soft = saturate((SceneEyeDepth(uv) - eyeDepth) / softRange);
+                float waterDepth = SAMPLE_TEXTURE2D(_FluidDepth, sampler_PointClamp, uv).r;
+                if (waterDepth > 0) soft *= saturate((waterDepth - eyeDepth) / softRange);
+                float3 normal = normalize(float3(input.disk, hemisphere));
+                float3 view = normalize(-surface);
+                float fresnel = .02 + .98 * pow(1 - saturate(dot(normal, view)), 5);
+                float3 light = normalize(mul((float3x3)UNITY_MATRIX_V, float3(-.5, .75, .4)));
+                float glint = pow(saturate(dot(normal, normalize(light + view))), 64);
+                output.color = half4(lerp(float3(.45,.64,.70), float3(.88,.96,1), fresnel) + glint * .6,
+                    input.radiusFade.y * soft * smoothstep(1, .15, r2) *
+                    (.16 + .42 * fresnel + .25 * glint));
+                output.depth = FluidDeviceDepth(surface);
+            }
             return output;
         }
         ENDHLSL

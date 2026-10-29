@@ -24,6 +24,7 @@ Shader "Hidden/WaterSplash/Continuous Surface"
         float4 _FluidWaterColor;
         float _FluidRefraction;
         float _ContinuousFoam;
+        float _DetailedWhitewater;
 
         float FoamNoise(float2 p)
         {
@@ -37,7 +38,15 @@ Shader "Hidden/WaterSplash/Continuous Surface"
 
         float FoamCoverage(float2 uv, float depth, float3 positionWS)
         {
-            float density = SAMPLE_TEXTURE2D(_FluidFoam, sampler_LinearClamp, uv).r;
+            float2 field = SAMPLE_TEXTURE2D(_FluidFoam, sampler_LinearClamp, uv).rg;
+            float density = field.r;
+            if (_DetailedWhitewater > .5)
+            {
+                float detail = saturate(field.g / max(density, 1e-4));
+                float packed = smoothstep(.4, 1.3, density);
+                float structure = lerp(saturate(detail * 2.2), .62 + .38 * detail, packed);
+                return (1 - exp(-3.2 * density)) * structure;
+            }
             if (_ContinuousFoam < .5) return 1 - exp(-1.5 * density);
             float sum = density * 4, weight = 4;
             const float2 offsets[4] = { float2(-1,0), float2(1,0), float2(0,-1), float2(0,1) };

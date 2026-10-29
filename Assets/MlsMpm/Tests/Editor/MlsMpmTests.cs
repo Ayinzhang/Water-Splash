@@ -74,6 +74,26 @@ namespace WaterSplash.Tests
         }
 
         [Test]
+        public void LegacySolverIgnoresPbSortingInterval()
+        {
+            fluid.enableWhitewater = false;
+            fluid.spatialSortInterval = 0;
+            fluid.Initialize();
+            fluid.StepSimulation(30);
+            MlsMpmFluid.Snapshot unsorted = fluid.CaptureSnapshot();
+            fluid.spatialSortInterval = 1;
+            fluid.Initialize();
+            fluid.StepSimulation(30);
+            MlsMpmFluid.Snapshot sorted = fluid.CaptureSnapshot();
+            AssertHealthy(sorted);
+            Assert.That(sorted.gridMass, Is.EqualTo(unsorted.gridMass).Within(1e-4));
+            Assert.That((sorted.center - unsorted.center).magnitude, Is.LessThan(1e-4f));
+            Assert.That((sorted.minimum - unsorted.minimum).magnitude, Is.LessThan(1e-4f));
+            Assert.That((sorted.maximum - unsorted.maximum).magnitude, Is.LessThan(1e-4f));
+            Assert.That(sorted.maximumSpeed, Is.EqualTo(unsorted.maximumSpeed).Within(1e-3));
+        }
+
+        [Test]
         public void SphereProjectionKeepsParticlesOutsideObstacle()
         {
             sphere = new GameObject("Test sphere");

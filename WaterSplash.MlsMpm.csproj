@@ -60,17 +60,28 @@
     <Analyzer Include="D:\Unity\2022.3.62f3\Editor\Data\Tools\Unity.SourceGenerators\Unity.Properties.SourceGenerator.dll" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="Assets\MlsMpm\Scripts\BottleVoyage.cs" />
     <Compile Include="Assets\MlsMpm\Scripts\MlsMpmFluid.cs" />
     <Compile Include="Assets\MlsMpm\Scripts\MlsMpmMobileValidation.cs" />
     <Compile Include="Assets\MlsMpm\Scripts\MlsMpmSurfaceFeature.cs" />
+    <Compile Include="Assets\MlsMpm\Scripts\BottleBoundary.cs" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="Assets\MlsMpm\Shaders\BottleGlass.shader" />
+    <None Include="Assets\MlsMpm\Shaders\PbMpm.hlsl" />
     <None Include="Assets\MlsMpm\Shaders\MlsMpmParticles.shader" />
+    <None Include="Assets\MlsMpm\Shaders\BottleWaterProbe.compute" />
+    <None Include="Assets\MlsMpm\Shaders\PbMpm-LICENSE.txt" />
     <None Include="Assets\MlsMpm\Shaders\MlsMpmSurfaceParticles.shader" />
     <None Include="Assets\MlsMpm\MlsMpm.asmdef" />
+    <None Include="Assets\MlsMpm\Shaders\BottleBoundary.hlsl" />
+    <None Include="Assets\MlsMpm\Shaders\BottleSeaweed.shader" />
     <None Include="Assets\MlsMpm\Shaders\MlsMpmSurface.shader" />
+    <None Include="Assets\MlsMpm\Shaders\BottleStillLife.shader" />
     <None Include="Assets\MlsMpm\Shaders\MlsMpm.compute" />
+    <None Include="Assets\MlsMpm\Shaders\BottleMlsMpm.compute" />
     <None Include="Assets\MlsMpm\Shaders\MlsMpmWhitewater.hlsl" />
+    <None Include="Assets\MlsMpm\Shaders\BottleBackdrop.shader" />
     <None Include="Assets\MlsMpm\Shaders\MlsMpmSurfaceCommon.hlsl" />
   </ItemGroup>
   <ItemGroup>

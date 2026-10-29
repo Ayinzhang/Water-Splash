@@ -1,0 +1,72 @@
+#pragma kernel Collect
+#pragma kernel Reduce
+
+struct Particle
+{
+    float4 position;
+    float4 velocity;
+    float4 affineX;
+    float4 affineY;
+    float4 affineZ;
+};
+
+StructuredBuffer<Particle> _Particles;
+RWStructuredBuffer<float4> _Partials;
+RWStructuredBuffer<float4> _Samples;
+float4 _ProbePositions[5];
+float3 _GridOrigin;
+float _CellSize;
+float _Radius;
+float _SurfaceOffset;
+uint _ParticleCount;
+uint _BlockCount;
+groupshared float4 values[128];
+
+float4 Merge(float4 a, float4 b)
+{
+    return float4(max(a.x, b.x), a.yzw + b.yzw);
+}
+
+[numthreads(128, 1, 1)]
+void Collect(uint3 group : SV_GroupID, uint thread : SV_GroupIndex)
+{
+    uint index = group.x * 128 + thread;
+    float4 value = float4(-1e10, 0, 0, 0);
+    if (index < _ParticleCount)
+    {
+        Particle p = _Particles[index];
+        float3 position = _GridOrigin + p.position.xyz * _CellSize;
+        float2 delta = position.xz - _ProbePositions[group.y].xz;
+        if (dot(delta, delta) < _Radius * _Radius)
+            value = float4(position.y, p.velocity.xz * _CellSize, 1);
+    }
+    values[thread] = value;
+    GroupMemoryBarrierWithGroupSync();
+    for (uint stride = 64; stride > 0; stride >>= 1)
+    {
+        if (thread < stride) values[thread] = Merge(values[thread], values[thread + stride]);
+        GroupMemoryBarrierWithGroupSync();
+    }
+    if (thread == 0) _Partials[group.y * _BlockCount + group.x] = values[0];
+}
+
+[numthreads(128, 1, 1)]
+void Reduce(uint3 group : SV_GroupID, uint thread : SV_GroupIndex)
+{
+    float4 value = float4(-1e10, 0, 0, 0);
+    for (uint block = thread; block < _BlockCount; block += 128)
+        value = Merge(value, _Partials[group.x * _BlockCount + block]);
+    values[thread] = value;
+    GroupMemoryBarrierWithGroupSync();
+    for (uint stride = 64; stride > 0; stride >>= 1)
+    {
+        if (thread < stride) values[thread] = Merge(values[thread], values[thread + stride]);
+        GroupMemoryBarrierWithGroupSync();
+    }
+    if (thread == 0)
+    {
+        value = values[0];
+        _Samples[group.x] = value.w > 0 ?
+            float4(value.x + _SurfaceOffset, value.yz / value.w, value.w) : 0;
+    }
+}

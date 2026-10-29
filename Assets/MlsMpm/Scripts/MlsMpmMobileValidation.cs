@@ -16,6 +16,9 @@ namespace WaterSplash
         public MlsMpmSurfaceFeature surfaceFeature;
         public int particles = 32768, grid = 48, steps = 8;
         [Range(1,4)] public int maxCatchUpTicks = 4;
+        [Range(0,16)] public int spatialSortInterval = 1;
+        public MlsMpmFluid.SolverMethod solverMethod;
+        [Range(1,16)] public int positionIterations = 2;
         public bool foam = true, rendering = true, paused, automaticStir;
         public int width = 1280, height = 720;
         public bool adaptiveResolution = true;
@@ -34,11 +37,13 @@ namespace WaterSplash
         int profileParticles, profileGrid, profileSteps, profileFlags = -1;
         void RecordProfileSettings()
         {
-            int flags=(rendering?1:0)|(foam?2:0)|(maxCatchUpTicks<<2);
+            int sort=solverMethod==MlsMpmFluid.SolverMethod.PositionBasedMpm?spatialSortInterval:0;
+            int flags=(rendering?1:0)|(foam?2:0)|(maxCatchUpTicks<<2)|(sort<<5)|
+                ((int)solverMethod<<11)|(positionIterations<<12);
             if(profileSettings==null || profileParticles!=particles || profileGrid!=grid || profileSteps!=steps || profileFlags!=flags)
             {
                 profileParticles=particles;profileGrid=grid;profileSteps=steps;profileFlags=flags;
-                profileSettings=string.Format("MPM Config/{0}p grid{1} steps{2} render{3} foam{4} catchup{5}",particles,grid,steps,rendering?1:0,foam?1:0,maxCatchUpTicks);
+                profileSettings=string.Format("MPM Config/{0}p grid{1} steps{2} render{3} foam{4} catchup{5} sort{6} solver{7} iter{8}",particles,grid,steps,rendering?1:0,foam?1:0,maxCatchUpTicks,sort,solverMethod,positionIterations);
             }
             UnityEngine.Profiling.Profiler.BeginSample(profileSettings);
             UnityEngine.Profiling.Profiler.EndSample();
@@ -84,6 +89,9 @@ namespace WaterSplash
                 maxCatchUpTicks=Mathf.Clamp(intent.Call<int>("getIntExtra","mpmCatchUpTicks",maxCatchUpTicks),1,4);
                 rendering=intent.Call<int>("getIntExtra","mpmRendering",rendering?1:0)!=0;
                 foam=intent.Call<int>("getIntExtra","mpmFoam",foam?1:0)!=0;
+                spatialSortInterval=Mathf.Clamp(intent.Call<int>("getIntExtra","mpmSort",spatialSortInterval),0,16);
+                solverMethod=(MlsMpmFluid.SolverMethod)Mathf.Clamp(intent.Call<int>("getIntExtra","mpmSolver",(int)solverMethod),0,1);
+                positionIterations=Mathf.Clamp(intent.Call<int>("getIntExtra","mpmIterations",positionIterations),1,16);
                 adaptiveResolution=intent.Call<int>("getIntExtra","mpmAdaptiveResolution",adaptiveResolution?1:0)!=0;
                 renderScale=Mathf.Clamp(intent.Call<float>("getFloatExtra","mpmRenderScale",renderScale),.25f,1);
                 width=Mathf.Max(2,intent.Call<int>("getIntExtra","mpmWidth",width));
@@ -116,7 +124,8 @@ namespace WaterSplash
                 error = null; saved = null;
                 fluid.gameObject.SetActive(false); fluid.externalControl = true; fluid.showControls = false;
                 fluid.particleCount=particles; fluid.gridResolution=grid; fluid.substeps=steps; fluid.domainSize=4;
-                fluid.whitewaterCapacity=Mathf.Min(particles,32768); fluid.enableWhitewater=foam;
+                fluid.whitewaterCapacity=Mathf.Min(particles,32768); fluid.enableWhitewater=foam; fluid.spatialSortInterval=spatialSortInterval;
+                fluid.solverMethod=solverMethod;fluid.positionIterations=positionIterations;
                 fluid.showParticles=rendering; fluid.renderSurface=true; fluid.surfaceQuality=quality;
                 fluid.affineDamping=fluid.divergenceDamping=0; fluid.gravity=new Vector3(0,-9.81f,0);
                 sphereTarget=spherePosition=new Vector3(.95f,.55f,0); sphere.position=spherePosition;
@@ -189,12 +198,14 @@ namespace WaterSplash
             Matrix4x4 old=GUI.matrix; float scale=Scale(); GUI.matrix=Matrix4x4.Scale(Vector3.one*scale);
             if(statusStyle==null)statusStyle=new GUIStyle(GUI.skin.label){wordWrap=false};
             var safe=SafeRect();GUILayout.BeginArea(new Rect(safe.x/scale+8,safe.y/scale+6,safe.width/scale-16,208),GUI.skin.box);
-            GUILayout.Label("MPM ANDROID PROFILE | "+SystemInfo.graphicsDeviceName+" | "+SystemInfo.graphicsDeviceType+" | "+(Debug.isDebugBuild?"Development":"Release"),statusStyle,GUILayout.Height(20));
+            GUILayout.Label((solverMethod==MlsMpmFluid.SolverMethod.MlsMpm?"MLS-MPM":"PB-MPM / "+positionIterations+" iterations")+" PROFILE | "+SystemInfo.graphicsDeviceName+" | "+SystemInfo.graphicsDeviceType+" | "+(Debug.isDebugBuild?"Development":"Release"),statusStyle,GUILayout.Height(20));
             GUILayout.Label(string.Format("{0:N0} particles | grid {1}^3 | {2} substeps | {3}x{4} {5} | frame {6:F2}ms ({7:F1} FPS)",particles,grid,steps,width,height,quality,meanFrame*1000,meanFrame>0?1/meanFrame:0),statusStyle,GUILayout.Height(20));
             GUILayout.Label(string.Format("Physics 60Hz | sim {0:F2}s / wall {1:F2}s ({2:F2}x) | backlog {3:F3}s | ticks/frame {4}/{5}",simulated,wall,wall>0?simulated/wall:0,backlog,lastFrameTicks,maxCatchUpTicks),statusStyle,GUILayout.Height(20));
             GUILayout.BeginHorizontal();
             if(GUILayout.Button(paused?"Run":"Pause",GUILayout.Height(30))) paused=!paused;
             if(GUILayout.Button("Reset",GUILayout.Height(30))) ResetWater();
+            if(GUILayout.Button(solverMethod==MlsMpmFluid.SolverMethod.MlsMpm?"Try PB-MPM":"Try MLS-MPM",GUILayout.Height(30)))
+            {solverMethod=solverMethod==MlsMpmFluid.SolverMethod.MlsMpm?MlsMpmFluid.SolverMethod.PositionBasedMpm:MlsMpmFluid.SolverMethod.MlsMpm;ResetWater();}
             if(GUILayout.Button(automaticStir?"Auto stir ON":"Auto stir OFF",GUILayout.Height(30))) {automaticStir=!automaticStir;ResetWater();}
             if(GUILayout.Button(foam?"Foam ON":"Foam OFF",GUILayout.Height(30))) {foam=!foam;fluid.enableWhitewater=foam;}
             if(GUILayout.Button(rendering?"Rendering ON":"Rendering OFF",GUILayout.Height(30))) {rendering=!rendering;fluid.showParticles=rendering;}
@@ -204,6 +215,11 @@ namespace WaterSplash
             {particles=count;grid=MlsMpmFluid.PresetGridResolution(count);ResetWater();}
             if(GUILayout.Button("Steps "+steps,GUILayout.Height(30))) {int[] s={1,2,3,4,6,8,12,16,24,32};int n=Array.IndexOf(s,steps)+1;steps=s[n>=s.Length?0:n];ResetWater();}
             if(GUILayout.Button("Catch-up "+maxCatchUpTicks+"t",GUILayout.Height(30))) {maxCatchUpTicks=maxCatchUpTicks==4?1:4;ResetWater();}
+            if(solverMethod==MlsMpmFluid.SolverMethod.PositionBasedMpm)
+            {
+                if(GUILayout.Button(spatialSortInterval>0?"PB sort ON":"PB sort OFF",GUILayout.Height(30))) {spatialSortInterval=spatialSortInterval>0?0:1;fluid.spatialSortInterval=spatialSortInterval;}
+                if(GUILayout.Button("PB iter "+positionIterations,GUILayout.Height(30))) {positionIterations=positionIterations>=8?1:positionIterations*2;ResetWater();}
+            }
             if(GUILayout.Button("Quality "+quality,GUILayout.Height(30))) {quality=(MlsMpmFluid.SurfaceQuality)(((int)quality+1)%3);fluid.surfaceQuality=quality;}
             if(GUILayout.Button(adaptiveResolution?"Auto "+Mathf.RoundToInt(renderScale*100)+"%":height+"p",GUILayout.Height(30)))
             {if(adaptiveResolution){if(renderScale>.8f)renderScale=.75f;else if(renderScale>.6f)renderScale=.5f;else{adaptiveResolution=false;SetResolution(1280,720);}}else if(height==720)SetResolution(960,540);else{adaptiveResolution=true;renderScale=1;}UpdateResolution();ResetWater();}
@@ -215,7 +231,8 @@ namespace WaterSplash
         {
             public string utc,device,gpu,api; public int particles,grid,substeps,width,height,frames,targetFrameRate,displayRefresh;
             public bool foam,rendering,development; public double meanMs,p95Ms,wallSeconds,simulationSeconds,backlogSeconds;
-            public int maxCatchUpTicks,submittedTicksInWindow;
+            public int maxCatchUpTicks,submittedTicksInWindow,spatialSortInterval;
+            public string solver;public int positionIterations;public float positionRelaxation,positionViscosity,gridVolumeBlend;
             public double meanTicksPerFrame,submittedTickHz,simulationToWallRatio;
             public bool adaptiveResolution;public float renderScale;public int screenWidth,screenHeight;
         }
@@ -227,7 +244,8 @@ namespace WaterSplash
             var s=new Stats{utc=DateTime.UtcNow.ToString("O"),device=SystemInfo.deviceModel,gpu=SystemInfo.graphicsDeviceName,api=SystemInfo.graphicsDeviceType.ToString(),
                 particles=particles,grid=grid,substeps=steps,width=width,height=height,frames=sampleCount,targetFrameRate=Application.targetFrameRate,displayRefresh=Screen.currentResolution.refreshRate,
                 foam=foam,rendering=rendering,development=Debug.isDebugBuild,meanMs=sum/sampleCount,p95Ms=sorted[(int)Math.Ceiling(sampleCount*.95)-1],wallSeconds=wall,simulationSeconds=simulated,backlogSeconds=backlog,
-                maxCatchUpTicks=maxCatchUpTicks,submittedTicksInWindow=windowTicks,meanTicksPerFrame=(double)windowTicks/sampleCount,submittedTickHz=sum>0?windowTicks*1000/sum:0,simulationToWallRatio=wall>0?simulated/wall:0,
+                maxCatchUpTicks=maxCatchUpTicks,spatialSortInterval=solverMethod==MlsMpmFluid.SolverMethod.PositionBasedMpm?spatialSortInterval:0,submittedTicksInWindow=windowTicks,meanTicksPerFrame=(double)windowTicks/sampleCount,submittedTickHz=sum>0?windowTicks*1000/sum:0,simulationToWallRatio=wall>0?simulated/wall:0,
+                solver=solverMethod.ToString(),positionIterations=positionIterations,positionRelaxation=fluid.positionRelaxation,positionViscosity=fluid.positionViscosity,gridVolumeBlend=fluid.gridVolumeBlend,
                 adaptiveResolution=adaptiveResolution,renderScale=renderScale,screenWidth=Screen.width,screenHeight=Screen.height};
             string path=Path.Combine(Application.persistentDataPath,manual?"profile-"+DateTime.UtcNow.ToString("yyyyMMdd-HHmmss")+".json":"profile-live.json");
             File.WriteAllText(path,JsonUtility.ToJson(s,true));if(manual)saved="Saved: "+path;Debug.Log("MOBILE PROFILE: "+JsonUtility.ToJson(s)+" | "+path);

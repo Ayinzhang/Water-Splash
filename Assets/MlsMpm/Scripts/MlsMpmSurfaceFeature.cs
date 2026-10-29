@@ -15,6 +15,8 @@ namespace WaterSplash
         [Range(0, 0.2f)] public float refraction = 0.08f;
         [Range(0.5f, 4)] public float surfaceSmoothing = 2.5f;
         public bool continuousFoam = true;
+        [Tooltip("Advected cellular foam detail and translucent, velocity-stretched spray. Does not change simulation.")]
+        public bool detailedWhitewater;
 
         Material particleMaterial;
         Material surfaceMaterial;
@@ -56,6 +58,8 @@ namespace WaterSplash
                      !SystemInfo.IsFormatSupported(GraphicsFormat.R16_SFloat, FormatUsage.Render) ||
                      !SystemInfo.IsFormatSupported(GraphicsFormat.R16_SFloat, FormatUsage.Blend))
                 error = "Water needs R32/RG32/RG16 float rendering and R16 float additive blending.";
+            else if (detailedWhitewater && !SystemInfo.IsFormatSupported(GraphicsFormat.R16G16_SFloat, FormatUsage.Blend))
+                error = "Detailed whitewater needs RG16 float additive blending.";
             foreach (MlsMpmFluid fluid in visible)
                 if (!ValidOpticalValue(fluid.surfaceRadiusScale) || fluid.surfaceRadiusScale <= 0 ||
                     fluid.surfaceQuality < MlsMpmFluid.SurfaceQuality.Low ||
@@ -152,7 +156,7 @@ namespace WaterSplash
                 descriptor.graphicsFormat = GraphicsFormat.R16G16_SFloat;
                 RenderingUtils.ReAllocateIfNeeded(ref normals, descriptor, FilterMode.Point, TextureWrapMode.Clamp,
                     name: "_MpmNormals");
-                descriptor.graphicsFormat = GraphicsFormat.R16_SFloat;
+                descriptor.graphicsFormat = owner.detailedWhitewater ? GraphicsFormat.R16G16_SFloat : GraphicsFormat.R16_SFloat;
                 RenderingUtils.ReAllocateIfNeeded(ref foam, descriptor, FilterMode.Bilinear, TextureWrapMode.Clamp,
                     name: "_MpmFoam");
                 cameraColor = renderingData.cameraData.renderer.cameraColorTargetHandle;
@@ -180,6 +184,7 @@ namespace WaterSplash
                         cmd.SetGlobalColor("_FluidWaterColor", owner.waterColor);
                         cmd.SetGlobalFloat("_FluidRefraction", owner.refraction);
                         cmd.SetGlobalFloat("_ContinuousFoam", owner.continuousFoam ? 1 : 0);
+                        cmd.SetGlobalFloat("_DetailedWhitewater", owner.detailedWhitewater ? 1 : 0);
 
                         cmd.BeginSample(renderStages[0]);
                         CoreUtils.SetRenderTarget(cmd, rawDepth, particleDepth, ClearFlag.All, Color.clear);
