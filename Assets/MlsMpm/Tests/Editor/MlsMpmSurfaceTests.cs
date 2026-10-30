@@ -96,6 +96,150 @@ namespace WaterSplash.Tests
             Assert.That(ShaderUtil.GetShaderMessages(shader), Is.Empty);
         }
 
+        [TestCase(false)]
+        [TestCase(true)]
+        public void SurfaceScissorContainsCornersAndHandlesOffscreenAndNearPlane(bool orthographic)
+        {
+            var owner = new GameObject("Scissor camera");
+            try
+            {
+                var camera = owner.AddComponent<Camera>();
+                camera.orthographic = orthographic;
+                camera.orthographicSize = 5;
+                camera.aspect = 1;
+                camera.nearClipPlane = .1f;
+                var bounds = new Bounds(new Vector3(0, 0, 5), Vector3.one * 2);
+                RectInt rect = MlsMpmSurfaceFeature.CalculateSurfaceScissor(camera, bounds, 128, 128);
+                Assert.That(rect.width * rect.height, Is.LessThan(128 * 128 / 2));
+                for (int i = 0; i < 8; i++)
+                {
+                    Vector3 p = camera.WorldToViewportPoint(bounds.center +
+                        new Vector3((i & 1) == 0 ? -1 : 1, (i & 2) == 0 ? -1 : 1, (i & 4) == 0 ? -1 : 1));
+                    Assert.That(p.x * 128, Is.InRange((float)rect.xMin, (float)rect.xMax));
+                    Assert.That(p.y * 128, Is.InRange((float)rect.yMin, (float)rect.yMax));
+                }
+                Assert.That(MlsMpmSurfaceFeature.CalculateSurfaceScissor(camera,
+                    new Bounds(new Vector3(100, 0, 5), Vector3.one), 128, 128).width, Is.Zero);
+                Assert.That(MlsMpmSurfaceFeature.CalculateSurfaceScissor(camera,
+                    new Bounds(new Vector3(0, 0, .2f), Vector3.one), 128, 128),
+                    Is.EqualTo(new RectInt(0, 0, 128, 128)));
+            }
+            finally { Object.DestroyImmediate(owner); }
+        }
+
+        [UnityTest]
+        public IEnumerator CroppingAndSoARetainSurfacePixelsAfterMovingTheFluid()
+        {
+            yield return new EnterPlayMode();
+            var root = new GameObject("Cropped surface regression");
+            root.SetActive(false);
+            var fluidObject = new GameObject("Test fluid");
+            fluidObject.transform.SetParent(root.transform);
+            fluidObject.transform.position = new Vector3(1000, 0, 1000);
+            fluidObject.layer = 31;
+            var fluid = fluidObject.AddComponent<MlsMpmFluid>();
+            fluid.simulationShader = AssetDatabase.LoadAssetAtPath<ComputeShader>("Assets/MlsMpm/Shaders/MlsMpm.compute");
+            fluid.particleCount = 512;
+            fluid.gridResolution = 16;
+            fluid.showControls = false;
+            var cameraObject = new GameObject("Cropped surface camera");
+            cameraObject.transform.SetParent(root.transform);
+            var camera = cameraObject.AddComponent<Camera>();
+            camera.enabled = false;
+            camera.cullingMask = 1 << 31;
+            camera.transform.position = new Vector3(1002, 2, 990);
+            camera.orthographic = true;
+            camera.orthographicSize = 7;
+            camera.nearClipPlane = .1f;
+            camera.farClipPlane = 30;
+            camera.allowMSAA = camera.allowHDR = false;
+            var destination = new RenderTexture(128, 128, 24);
+            var features = Resources.FindObjectsOfTypeAll<MlsMpmSurfaceFeature>();
+            var previousFlags = new bool[features.Length];
+            for (int i = 0; i < features.Length; i++) previousFlags[i] = features[i].cropToFluidBounds;
+            RenderTexture previous = RenderTexture.active;
+            try
+            {
+                root.SetActive(true);
+                fluid.paused = true;
+                destination.Create();
+                for (int frame = 0; frame < 2; frame++)
+                {
+                    Vector2[] reference = RenderCroppedSurface(camera, destination, fluid, features, false);
+                    Color32[] referenceColor = ReadSurfaceColor(destination);
+                    fluid.useParticleSoA = true;
+                    fluid.Initialize();
+                    fluid.paused = true;
+                    Vector3 position = fluid.transform.position;
+                    fluid.transform.position += new Vector3(-3, 1, 0);
+                    RenderCroppedSurface(camera, destination, fluid, features, true);
+                    fluid.transform.position = position;
+                    Vector2[] cropped = RenderCroppedSurface(camera, destination, fluid, features, true);
+                    Color32[] croppedColor = ReadSurfaceColor(destination);
+                    int visible = 0;
+                    for (int i = 0; i < reference.Length; i++)
+                    {
+                        Assert.That(cropped[i].x, Is.EqualTo(reference[i].x).Within(.00001), "depth pixel " + i);
+                        Assert.That(cropped[i].y, Is.EqualTo(reference[i].y).Within(.00001), "thickness pixel " + i);
+                        if (reference[i].x > 0) visible++;
+                    }
+                    Assert.That(visible, Is.GreaterThan(10));
+                    for (int i = 0; i < referenceColor.Length; i++)
+                    {
+                        Assert.That(croppedColor[i].r, Is.EqualTo(referenceColor[i].r).Within(1), "red pixel " + i);
+                        Assert.That(croppedColor[i].g, Is.EqualTo(referenceColor[i].g).Within(1), "green pixel " + i);
+                        Assert.That(croppedColor[i].b, Is.EqualTo(referenceColor[i].b).Within(1), "blue pixel " + i);
+                    }
+                    fluid.transform.position += new Vector3(3, -1, 0);
+                }
+            }
+            finally
+            {
+                for (int i = 0; i < features.Length; i++)
+                    if (features[i] != null) features[i].cropToFluidBounds = previousFlags[i];
+                RenderTexture.active = previous;
+                destination.Release();
+                Object.DestroyImmediate(destination);
+                Object.DestroyImmediate(root);
+            }
+        }
+
+        static Vector2[] RenderCroppedSurface(Camera camera, RenderTexture destination, MlsMpmFluid fluid,
+            MlsMpmSurfaceFeature[] features, bool crop)
+        {
+            foreach (var feature in features) feature.cropToFluidBounds = crop;
+            RenderPipeline.SubmitRenderRequest(camera,
+                new UniversalRenderPipeline.SingleCameraRequest { destination = destination });
+            Assert.That(fluid.RenderingError, Is.Null);
+            var surface = Shader.GetGlobalTexture("_FluidDepth") as RenderTexture;
+            Assert.That(surface, Is.Not.Null);
+            var texture = new Texture2D(surface.width, surface.height, TextureFormat.RGFloat, false, true);
+            try
+            {
+                RenderTexture.active = surface;
+                texture.ReadPixels(new Rect(0, 0, surface.width, surface.height), 0, 0);
+                texture.Apply();
+                var values = texture.GetPixelData<Vector2>(0);
+                var result = new Vector2[values.Length];
+                values.CopyTo(result);
+                return result;
+            }
+            finally { Object.DestroyImmediate(texture); }
+        }
+
+        static Color32[] ReadSurfaceColor(RenderTexture target)
+        {
+            var texture = new Texture2D(target.width, target.height, TextureFormat.RGBA32, false, true);
+            try
+            {
+                RenderTexture.active = target;
+                texture.ReadPixels(new Rect(0, 0, target.width, target.height), 0, 0);
+                texture.Apply();
+                return texture.GetPixels32();
+            }
+            finally { Object.DestroyImmediate(texture); }
+        }
+
         [Test]
         public void DetailedWhitewaterIsOptInAndEnabledOnlyForTheBottleRenderer()
         {

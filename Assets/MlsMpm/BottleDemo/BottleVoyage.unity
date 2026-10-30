@@ -2170,7 +2170,7 @@ MonoBehaviour:
   particleCount: 32768
   gridResolution: 80
   domainSize: 4
-  substeps: 8
+  substeps: 6
   maxCatchUpTicks: 4
   soundSpeed: 6
   pressureExponent: 3
@@ -2187,6 +2187,8 @@ MonoBehaviour:
   surfaceQuality: 2
   surfaceRadiusScale: 0.95
   enableWhitewater: 1
+  useParticleSoA: 1
+  cacheGridBoundary: 1
   spatialSortInterval: 0
   solverMethod: 0
   positionIterations: 2
@@ -13512,6 +13514,7 @@ MonoBehaviour:
   center: {x: 0, y: 0.91, z: 0}
   fillHeight: 0.73
   mouthFacesLeft: 1
+  compactGrid: 1
 --- !u!1 &1395055841
 GameObject:
   m_ObjectHideFlags: 0

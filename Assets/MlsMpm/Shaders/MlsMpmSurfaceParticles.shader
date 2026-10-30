@@ -10,15 +10,8 @@ Shader "Hidden/WaterSplash/Surface Particles"
         #include "MlsMpmSurfaceCommon.hlsl"
         #include "MlsMpmWhitewater.hlsl"
 
-        struct Particle
-        {
-            float4 position;
-            float4 velocity;
-            float4 affineX;
-            float4 affineY;
-            float4 affineZ;
-        };
-        StructuredBuffer<Particle> _Particles;
+        #define MPM_PARTICLES_READ_ONLY
+        #include "MlsMpmParticleState.hlsl"
         float3 _Origin;
         float _CellSize;
         float _Radius;
@@ -45,7 +38,7 @@ Shader "Hidden/WaterSplash/Surface Particles"
                 float2(-1,-1), float2(1,1), float2(1,-1)
             };
             ParticleVaryings output;
-            output.centerVS = TransformWorldToView(_Origin + _CellSize * _Particles[instance].position.xyz);
+            output.centerVS = TransformWorldToView(_Origin + _CellSize * ParticlePosition(instance).xyz);
             output.disk = corners[vertex];
             output.positionCS = mul(UNITY_MATRIX_P,
                 float4(output.centerVS + float3(output.disk * _Radius, 0), 1));

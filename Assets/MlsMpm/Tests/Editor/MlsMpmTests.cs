@@ -94,6 +94,30 @@ namespace WaterSplash.Tests
         }
 
         [Test]
+        public void SortBuffersAreAllocatedOnlyForPbAndReleasedWhenReturningToMls()
+        {
+            const System.Reflection.BindingFlags flags =
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+            string[] fields = { "sortKeys", "sortRanks", "sortBins", "sortedParticles" };
+            foreach (string field in fields)
+                Assert.That(typeof(MlsMpmFluid).GetField(field, flags).GetValue(fluid), Is.Null, field);
+            Assert.That(fluid.GridWindow.position, Is.EqualTo(Vector3Int.zero));
+            Assert.That(fluid.GridDimensions, Is.EqualTo(Vector3Int.one * fluid.gridResolution));
+            fluid.solverMethod = MlsMpmFluid.SolverMethod.PositionBasedMpm;
+            fluid.Initialize();
+            foreach (string field in fields)
+                Assert.That(typeof(MlsMpmFluid).GetField(field, flags).GetValue(fluid), Is.Not.Null, field);
+            fluid.StepSimulation(10);
+            AssertHealthy(fluid.CaptureSnapshot());
+            fluid.solverMethod = MlsMpmFluid.SolverMethod.MlsMpm;
+            fluid.Initialize();
+            foreach (string field in fields)
+                Assert.That(typeof(MlsMpmFluid).GetField(field, flags).GetValue(fluid), Is.Null, field);
+            fluid.StepSimulation(10);
+            AssertHealthy(fluid.CaptureSnapshot());
+        }
+
+        [Test]
         public void SphereProjectionKeepsParticlesOutsideObstacle()
         {
             sphere = new GameObject("Test sphere");

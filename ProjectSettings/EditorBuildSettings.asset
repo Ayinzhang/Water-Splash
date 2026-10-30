@@ -6,6 +6,6 @@ EditorBuildSettings:
   serializedVersion: 2
   m_Scenes:
   - enabled: 1
-    path: Assets/MlsMpm/MobileValidation/Scenes/AndroidProfile.unity
-    guid: 0b0e6e9d7f997cf4387a4cc32ab70820
+    path: Assets/MlsMpm/BottleDemo/BottleVoyage.unity
+    guid: 770d1c90e7e910a4888ae3eadbd1fe82
   m_configObjects: {}

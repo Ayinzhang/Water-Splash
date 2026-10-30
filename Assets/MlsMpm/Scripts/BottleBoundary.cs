@@ -14,6 +14,8 @@ namespace WaterSplash
         public Vector3 center = new Vector3(0, .91f, 0);
         public float fillHeight = .73f;
         public bool mouthFacesLeft;
+        [Tooltip("Omit empty grid slabs without changing cell size or world coordinates. Reset after changing.")]
+        public bool compactGrid = true;
         public float AxisSign => mouthFacesLeft ? -1 : 1;
         public float ParticleSpacing { get; private set; }
         public float WaterVolume { get; private set; }
@@ -28,25 +30,62 @@ namespace WaterSplash
             new Vector2(1.72f,.24f), new Vector2(1.75f,.24f)
         };
         readonly Vector4[] gpuProfile = new Vector4[32];
+        Vector3 lastGpuCenter;
+        float lastGpuAxis;
 
         void Awake()
         {
-            if (fluid != null) fluid.configureSimulation += Configure;
+            if (fluid != null)
+            {
+                ConfigureGridWindow();
+                fluid.configureSimulation += Configure;
+            }
         }
         void OnDestroy()
         {
             if (fluid != null) fluid.configureSimulation -= Configure;
         }
+
+        public void ConfigureGridWindow()
+        {
+            if (fluid == null) throw new InvalidOperationException("Assign the bottle fluid before configuring its grid.");
+            fluid.gridWindow = null;
+            if (!compactGrid) return;
+            // Keep the exact original lattice and full X extent. Only empty Y/Z slabs
+            // are omitted, with room for transfer support and whitewater gradient probes.
+            float radius = 0;
+            foreach (Vector2 section in Profile) radius = Mathf.Max(radius, section.y);
+            Vector3 minimum = (center - new Vector3(0, radius, radius) - fluid.GridOrigin) / fluid.CellSize;
+            Vector3 maximum = (center + new Vector3(0, radius, radius) - fluid.GridOrigin) / fluid.CellSize;
+            Vector3Int lower = Vector3Int.Max(Vector3Int.zero, Vector3Int.FloorToInt(minimum) - Vector3Int.one * 4);
+            Vector3Int upper = Vector3Int.Min(Vector3Int.one * fluid.gridResolution,
+                Vector3Int.CeilToInt(maximum) + Vector3Int.one * 5);
+            lower = new Vector3Int(lower.x / 4 * 4, lower.y / 4 * 4, lower.z / 4 * 4);
+            upper = Vector3Int.Min(Vector3Int.one * fluid.gridResolution,
+                new Vector3Int((upper.x + 3) / 4 * 4, (upper.y + 3) / 4 * 4, (upper.z + 3) / 4 * 4));
+            lower.x = 0;
+            upper.x = fluid.gridResolution;
+            fluid.gridWindow = new BoundsInt(lower, upper - lower);
+        }
         void Configure(CommandBuffer commands, ComputeShader shader)
         {
             float h = fluid.CellSize;
+            Vector3 gpuCenter = (center - fluid.GridOrigin) / h;
+            bool geometryChanged = !gpuCenter.Equals(lastGpuCenter) || AxisSign != lastGpuAxis;
             for (int i = 0; i < Profile.Length; i++)
-                gpuProfile[i] = new Vector4(Profile[i].x / h, Profile[i].y / h, 0, 0);
+            {
+                var section = new Vector4(Profile[i].x / h, Profile[i].y / h, 0, 0);
+                geometryChanged |= !section.Equals(gpuProfile[i]);
+                gpuProfile[i] = section;
+            }
             commands.SetComputeIntParam(shader, "_BottleProfileCount", Profile.Length);
             commands.SetComputeVectorArrayParam(shader, "_BottleProfile", gpuProfile);
-            commands.SetComputeVectorParam(shader, "_BottleCenter", (center - fluid.GridOrigin) / h);
+            commands.SetComputeVectorParam(shader, "_BottleCenter", gpuCenter);
             commands.SetComputeFloatParam(shader, "_BottleClearance", .75f * ParticleSpacing / h);
             commands.SetComputeFloatParam(shader, "_BottleAxisSign", AxisSign);
+            fluid.PrepareGridBoundary(commands, geometryChanged);
+            lastGpuCenter = gpuCenter;
+            lastGpuAxis = AxisSign;
         }
 
         public static float Radius(float x, out float slope)

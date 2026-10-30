@@ -13,7 +13,7 @@ static const float DisplacementScale = 1048576.0;
 void PbPrepare(uint id : SV_DispatchThreadID)
 {
     if (id >= (uint)_ParticleCount || _Diagnostics[0] != 0) return;
-    Particle p = _Particles[id];
+    Particle p = LoadParticle(id);
     if (!all(isfinite(p.position)) || !all(isfinite(p.velocity)) ||
         !all(isfinite(p.affineX)) || !all(isfinite(p.affineY)) || !all(isfinite(p.affineZ)))
     {
@@ -31,14 +31,14 @@ void PbPrepare(uint id : SV_DispatchThreadID)
     p.affineY.xyz *= _Dt;
     p.affineZ.xyz *= _Dt;
     if (p.affineX.w == 0) p.affineX.w = 1;
-    _Particles[id] = p;
+    StoreParticle(id, p);
 }
 
 [numthreads(128, 1, 1)]
 void PbProject(uint id : SV_DispatchThreadID)
 {
     if (id >= (uint)_ParticleCount || _Diagnostics[0] != 0) return;
-    Particle p = _Particles[id];
+    Particle p = LoadParticle(id);
     float3x3 d = float3x3(p.affineX.xyz, p.affineY.xyz, p.affineZ.xyz);
     d -= 0.5 * _PbViscosity * (d + transpose(d));
     // det((I+D)F) ~= (1+tr(D))*J. In 3D tr(alpha I) = 3 alpha.
@@ -49,14 +49,14 @@ void PbProject(uint id : SV_DispatchThreadID)
     p.affineX.xyz = d[0];
     p.affineY.xyz = d[1];
     p.affineZ.xyz = d[2];
-    _Particles[id] = p;
+    StoreParticle(id, p);
 }
 
 [numthreads(128, 1, 1)]
 void PbScatter(uint id : SV_DispatchThreadID)
 {
     if (id >= (uint)_ParticleCount || _Diagnostics[0] != 0) return;
-    Particle p = _Particles[id];
+    Particle p = LoadParticle(id);
     int3 origin;
     float3 w[3];
     Weights(p.position.xyz, origin, w);
@@ -101,7 +101,7 @@ void PbGrid(uint id : SV_DispatchThreadID)
 void PbGather(uint id : SV_DispatchThreadID)
 {
     if (id >= (uint)_ParticleCount || _Diagnostics[0] != 0) return;
-    Particle p = _Particles[id];
+    Particle p = LoadParticle(id);
     int3 origin;
     float3 w[3];
     Weights(p.position.xyz, origin, w);
@@ -136,7 +136,7 @@ void PbGather(uint id : SV_DispatchThreadID)
     p.affineX.xyz = dx;
     p.affineY.xyz = dy;
     p.affineZ.xyz = dz;
-    _Particles[id] = p;
+    StoreParticle(id, p);
     InterlockedMax(_Diagnostics[1], (uint)round(min(ratio, 100000.0) * 1024));
 }
 
@@ -144,7 +144,7 @@ void PbGather(uint id : SV_DispatchThreadID)
 void PbIntegrate(uint id : SV_DispatchThreadID)
 {
     if (id >= (uint)_ParticleCount || _Diagnostics[0] != 0) return;
-    Particle p = _Particles[id];
+    Particle p = LoadParticle(id);
     float3 displacement = p.velocity.xyz;
     if (!all(isfinite(displacement))) { Fault(1, id); return; }
     if (length(displacement) > 0.75) { Fault(16, id); return; }
@@ -183,7 +183,7 @@ void PbIntegrate(uint id : SV_DispatchThreadID)
     p.affineX.xyz = contact ? 0 : p.affineX.xyz / _Dt;
     p.affineY.xyz = contact ? 0 : p.affineY.xyz / _Dt;
     p.affineZ.xyz = contact ? 0 : p.affineZ.xyz / _Dt;
-    _Particles[id] = p;
+    StoreParticle(id, p);
     InterlockedMax(_Diagnostics[2], (uint)round(min(length(velocity), 100000.0) * 1024));
 }
 

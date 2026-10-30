@@ -83,6 +83,7 @@
     <None Include="Assets\MlsMpm\Shaders\MlsMpmWhitewater.hlsl" />
     <None Include="Assets\MlsMpm\Shaders\BottleBackdrop.shader" />
     <None Include="Assets\MlsMpm\Shaders\MlsMpmSurfaceCommon.hlsl" />
+    <None Include="Assets\MlsMpm\Shaders\MlsMpmParticleState.hlsl" />
   </ItemGroup>
   <ItemGroup>
     <Reference Include="UnityEngine">

@@ -7,6 +7,15 @@ namespace WaterSplash.Tests
 {
     public sealed class BottleVoyageTests
     {
+        [TestCase(16384, 6)]
+        [TestCase(32768, 6)]
+        [TestCase(65536, 6)]
+        [TestCase(131072, 8)]
+        public void BottleSubstepsFollowParticleTier(int count, int steps)
+        {
+            Assert.That(BottleVoyage.SubstepsForParticleCount(count), Is.EqualTo(steps));
+        }
+
         [Test]
         public void DragMovesBoatImmediatelyAndWaterHeightDoesNotShiftGrab()
         {
@@ -74,8 +83,9 @@ namespace WaterSplash.Tests
             finally { Object.DestroyImmediate(owner); }
         }
 
-        [Test]
-        public void WaterProbeReducesNonMultipleParticleCountAndReportsEmptySamples()
+        [TestCase(false)]
+        [TestCase(true)]
+        public void WaterProbeReducesNonMultipleParticleCountAndReportsEmptySamples(bool soa)
         {
             if (!SystemInfo.supportsComputeShaders) Assert.Ignore("Compute shader required.");
             var shader = Object.Instantiate(AssetDatabase.LoadAssetAtPath<ComputeShader>(
@@ -83,20 +93,20 @@ namespace WaterSplash.Tests
             const int count = 513, blocks = (count + 127) / 128;
             try
             {
-                using (var particles = new ComputeBuffer(count, sizeof(float) * 20))
+                using (var particles = new ComputeBuffer(count * 5, sizeof(float) * 4))
                 using (var partials = new ComputeBuffer(blocks * 5, sizeof(float) * 4))
                 using (var results = new ComputeBuffer(5, sizeof(float) * 4))
                 {
-                    var states = new MlsMpmFluid.ParticleState[count];
+                    var states = new Vector4[count * 5];
                     for (int i = 0; i < count; i++)
                     {
-                        states[i].position = new Vector4(10, 4, 10, 1);
-                        states[i].velocity = new Vector4(2, 0, -3, 0);
+                        states[soa ? i : i * 5] = new Vector4(10, i == count - 1 ? 5 : 4, 10, 1);
+                        states[soa ? i + count : i * 5 + 1] = new Vector4(2, 0, -3, 0);
                     }
-                    states[count - 1].position.y = 5;
                     particles.SetData(states);
                     int collect = shader.FindKernel("Collect"), reduce = shader.FindKernel("Reduce");
                     shader.SetBuffer(collect, "_Particles", particles);
+                    shader.SetInt("_ParticlePlaneStride", soa ? count : 0);
                     shader.SetBuffer(collect, "_Partials", partials);
                     shader.SetBuffer(reduce, "_Partials", partials);
                     shader.SetBuffer(reduce, "_Samples", results);

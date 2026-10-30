@@ -19,15 +19,8 @@ Shader "WaterSplash/MLS-MPM Particles"
             #pragma fragment Frag
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
 
-            struct Particle
-            {
-                float4 position;
-                float4 velocity;
-                float4 affineX;
-                float4 affineY;
-                float4 affineZ;
-            };
-            StructuredBuffer<Particle> _Particles;
+            #define MPM_PARTICLES_READ_ONLY
+            #include "MlsMpmParticleState.hlsl"
             float3 _Origin;
             float _CellSize;
             float _Radius;
@@ -48,7 +41,7 @@ Shader "WaterSplash/MLS-MPM Particles"
                     float2(-1,-1), float2(-1,1), float2(1,1),
                     float2(-1,-1), float2(1,1), float2(1,-1)
                 };
-                Particle p = _Particles[instance];
+                Particle p = LoadParticle(instance);
                 float3 center = TransformWorldToView(_Origin + _CellSize * p.position.xyz);
                 Varyings output;
                 output.disk = corners[vertex];

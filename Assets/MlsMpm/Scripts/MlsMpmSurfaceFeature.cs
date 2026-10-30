@@ -17,6 +17,8 @@ namespace WaterSplash
         public bool continuousFoam = true;
         [Tooltip("Advected cellular foam detail and translucent, velocity-stretched spray. Does not change simulation.")]
         public bool detailedWhitewater;
+        [Tooltip("Conservatively scissor water passes to the projected simulation bounds. Buffer resolution and filters stay unchanged.")]
+        public bool cropToFluidBounds;
 
         Material particleMaterial;
         Material surfaceMaterial;
@@ -76,6 +78,30 @@ namespace WaterSplash
 
         static bool ValidOpticalValue(float value) => !float.IsNaN(value) && !float.IsInfinity(value) && value >= 0;
 
+        public static RectInt CalculateSurfaceScissor(Camera camera, Bounds bounds, int width, int height)
+        {
+            if (camera == null || width < 1 || height < 1)
+                throw new System.ArgumentException("A camera and positive render-target dimensions are required.");
+            Vector3 minimum = bounds.min, maximum = bounds.max;
+            Vector2 lower = Vector2.one * float.PositiveInfinity, upper = Vector2.one * float.NegativeInfinity;
+            for (int i = 0; i < 8; i++)
+            {
+                Vector3 p = camera.WorldToViewportPoint(new Vector3(
+                    (i & 1) == 0 ? minimum.x : maximum.x,
+                    (i & 2) == 0 ? minimum.y : maximum.y,
+                    (i & 4) == 0 ? minimum.z : maximum.z));
+                // A near-plane crossing can project beyond the corner envelope.
+                if (p.z <= camera.nearClipPlane) return new RectInt(0, 0, width, height);
+                lower = Vector2.Min(lower, p);
+                upper = Vector2.Max(upper, p);
+            }
+            int x0 = Mathf.Clamp(Mathf.FloorToInt(lower.x * width) - 4, 0, width);
+            int y0 = Mathf.Clamp(Mathf.FloorToInt(lower.y * height) - 4, 0, height);
+            int x1 = Mathf.Clamp(Mathf.CeilToInt(upper.x * width) + 4, 0, width);
+            int y1 = Mathf.Clamp(Mathf.CeilToInt(upper.y * height) + 4, 0, height);
+            return new RectInt(x0, y0, Mathf.Max(0, x1 - x0), Mathf.Max(0, y1 - y0));
+        }
+
         protected override void Dispose(bool disposing)
         {
             pass?.Dispose();
@@ -110,6 +136,9 @@ namespace WaterSplash
             int height;
             int iterations;
             float radius;
+            RectInt scissor;
+            Rect cameraScissor;
+            bool cropped;
 
             public SurfacePass(MlsMpmSurfaceFeature feature) => owner = feature;
 
@@ -128,6 +157,17 @@ namespace WaterSplash
                 RenderTextureDescriptor descriptor = renderingData.cameraData.cameraTargetDescriptor;
                 width = Mathf.Max(1, (descriptor.width + divisor - 1) / divisor);
                 height = Mathf.Max(1, (descriptor.height + divisor - 1) / divisor);
+                scissor = new RectInt(0, 0, width, height);
+                if (owner.cropToFluidBounds)
+                {
+                    Bounds bounds = owner.visible[0].SurfaceBounds;
+                    for (int i = 1; i < owner.visible.Count; i++) bounds.Encapsulate(owner.visible[i].SurfaceBounds);
+                    scissor = CalculateSurfaceScissor(renderingData.cameraData.camera, bounds, width, height);
+                }
+                cropped = !scissor.Equals(new RectInt(0, 0, width, height));
+                float scaleX = (float)descriptor.width / width, scaleY = (float)descriptor.height / height;
+                cameraScissor = Rect.MinMaxRect(Mathf.Floor(scissor.xMin * scaleX), Mathf.Floor(scissor.yMin * scaleY),
+                    Mathf.Ceil(scissor.xMax * scaleX), Mathf.Ceil(scissor.yMax * scaleY));
                 descriptor.width = width;
                 descriptor.height = height;
                 descriptor.msaaSamples = 1;
@@ -169,6 +209,11 @@ namespace WaterSplash
                 CommandBuffer cmd = CommandBufferPool.Get();
                 try
                 {
+                    if (scissor.width == 0 || scissor.height == 0)
+                    {
+                        foreach (MlsMpmFluid fluid in owner.visible) fluid.MarkSurfaceRendered();
+                        return;
+                    }
                     using (new ProfilingScope(cmd, profiler))
                     {
                         cmd.SetGlobalVector("_FluidBufferSize", new Vector4(width, height, 1f / width, 1f / height));
@@ -187,11 +232,13 @@ namespace WaterSplash
                         cmd.SetGlobalFloat("_DetailedWhitewater", owner.detailedWhitewater ? 1 : 0);
 
                         cmd.BeginSample(renderStages[0]);
+                        cmd.DisableScissorRect();
                         CoreUtils.SetRenderTarget(cmd, rawDepth, particleDepth, ClearFlag.All, Color.clear);
+                        if (cropped) cmd.EnableScissorRect(new Rect(scissor.x, scissor.y, scissor.width, scissor.height));
                         DrawParticles(cmd, 0);
                         cmd.EndSample(renderStages[0]);
                         cmd.BeginSample(renderStages[1]);
-                        CoreUtils.SetRenderTarget(cmd, thickness, ClearFlag.Color, Color.clear);
+                        SetBufferTarget(cmd, thickness, ClearFlag.Color);
                         DrawParticles(cmd, 1);
                         cmd.EndSample(renderStages[1]);
 
@@ -208,22 +255,25 @@ namespace WaterSplash
                         cmd.EndSample(renderStages[2]);
                         cmd.SetGlobalTexture("_FluidDepth", source.nameID);
                         cmd.BeginSample(renderStages[3]);
-                        CoreUtils.SetRenderTarget(cmd, normals);
+                        SetBufferTarget(cmd, normals);
                         cmd.DrawProcedural(Matrix4x4.identity, owner.surfaceMaterial, 2, MeshTopology.Triangles, 3, 1);
                         cmd.EndSample(renderStages[3]);
                         cmd.BeginSample(renderStages[4]);
-                        CoreUtils.SetRenderTarget(cmd, foam, ClearFlag.Color, Color.clear);
+                        SetBufferTarget(cmd, foam, ClearFlag.Color);
                         DrawWhitewater(cmd, 2, true);
                         cmd.SetGlobalTexture("_FluidFoam", foam.nameID);
                         cmd.EndSample(renderStages[4]);
                         cmd.BeginSample(renderStages[5]);
                         cmd.SetGlobalTexture("_FluidNormals", normals.nameID);
+                        cmd.DisableScissorRect();
                         CoreUtils.SetRenderTarget(cmd, cameraColor, cameraDepth);
+                        if (cropped) cmd.EnableScissorRect(cameraScissor);
                         cmd.DrawProcedural(Matrix4x4.identity, owner.surfaceMaterial, 1, MeshTopology.Triangles, 3, 1);
                         cmd.EndSample(renderStages[5]);
                         cmd.BeginSample(renderStages[6]);
                         DrawWhitewater(cmd, 3, false);
                         cmd.EndSample(renderStages[6]);
+                        cmd.DisableScissorRect();
                     }
                     context.ExecuteCommandBuffer(cmd);
                     foreach (MlsMpmFluid fluid in owner.visible) fluid.MarkSurfaceRendered();
@@ -257,6 +307,7 @@ namespace WaterSplash
                 {
                     properties.Clear();
                     properties.SetBuffer("_Particles", fluid.ParticleBuffer);
+                    properties.SetInt("_ParticlePlaneStride", fluid.ParticlePlaneStride);
                     properties.SetVector("_Origin", fluid.GridOrigin);
                     properties.SetFloat("_CellSize", fluid.CellSize);
                     properties.SetFloat("_Radius", fluid.SurfaceParticleRadius);
@@ -273,8 +324,16 @@ namespace WaterSplash
                 cmd.SetGlobalTexture("_FluidSource", source.nameID);
                 cmd.SetGlobalVector("_FluidBlurDirection", direction);
                 cmd.SetGlobalFloat("_FluidFirstFilter", first ? 1 : 0);
-                CoreUtils.SetRenderTarget(cmd, destination);
+                SetBufferTarget(cmd, destination);
                 cmd.DrawProcedural(Matrix4x4.identity, owner.surfaceMaterial, 0, MeshTopology.Triangles, 3, 1);
+            }
+
+            void SetBufferTarget(CommandBuffer cmd, RTHandle target, ClearFlag clear = ClearFlag.None)
+            {
+                cmd.DisableScissorRect();
+                // Clear outside the ROI too: filters must never sample last frame's contents.
+                CoreUtils.SetRenderTarget(cmd, target, cropped ? ClearFlag.Color : clear, Color.clear);
+                if (cropped) cmd.EnableScissorRect(new Rect(scissor.x, scissor.y, scissor.width, scissor.height));
             }
 
             public void Dispose()

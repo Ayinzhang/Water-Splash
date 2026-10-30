@@ -1,16 +1,8 @@
 #pragma kernel Collect
 #pragma kernel Reduce
 
-struct Particle
-{
-    float4 position;
-    float4 velocity;
-    float4 affineX;
-    float4 affineY;
-    float4 affineZ;
-};
-
-StructuredBuffer<Particle> _Particles;
+#define MPM_PARTICLES_READ_ONLY
+#include "MlsMpmParticleState.hlsl"
 RWStructuredBuffer<float4> _Partials;
 RWStructuredBuffer<float4> _Samples;
 float4 _ProbePositions[5];
@@ -34,7 +26,7 @@ void Collect(uint3 group : SV_GroupID, uint thread : SV_GroupIndex)
     float4 value = float4(-1e10, 0, 0, 0);
     if (index < _ParticleCount)
     {
-        Particle p = _Particles[index];
+        Particle p = LoadParticle(index);
         float3 position = _GridOrigin + p.position.xyz * _CellSize;
         float2 delta = position.xz - _ProbePositions[group.y].xz;
         if (dot(delta, delta) < _Radius * _Radius)

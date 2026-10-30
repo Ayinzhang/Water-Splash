@@ -21,16 +21,7 @@
 
 #include "MlsMpmWhitewater.hlsl"
 
-struct Particle
-{
-    float4 position;
-    float4 velocity;
-    float4 affineX;
-    float4 affineY;
-    float4 affineZ;
-};
-
-RWStructuredBuffer<Particle> _Particles;
+#include "MlsMpmParticleState.hlsl"
 RWStructuredBuffer<int> _Accumulation;
 RWStructuredBuffer<float4> _Grid;
 RWStructuredBuffer<uint> _Diagnostics;
@@ -127,7 +118,7 @@ void ClearGrid(uint id : SV_DispatchThreadID)
 void TransferMass(uint id : SV_DispatchThreadID)
 {
     if (id >= (uint)_ParticleCount || _Diagnostics[0] != 0) return;
-    Particle p = _Particles[id];
+    Particle p = LoadParticle(id);
     if (!all(isfinite(p.position)) || !all(isfinite(p.velocity)) ||
         !all(isfinite(p.affineX)) || !all(isfinite(p.affineY)) || !all(isfinite(p.affineZ)))
     {
@@ -163,7 +154,7 @@ void TransferMass(uint id : SV_DispatchThreadID)
 void TransferStress(uint id : SV_DispatchThreadID)
 {
     if (id >= (uint)_ParticleCount || _Diagnostics[0] != 0) return;
-    Particle p = _Particles[id];
+    Particle p = LoadParticle(id);
     int3 origin;
     float3 w[3];
     Weights(p.position.xyz, origin, w);
@@ -187,7 +178,7 @@ void TransferStress(uint id : SV_DispatchThreadID)
     }
     InterlockedMax(_Diagnostics[1], (uint)round(ratio * 1024.0));
     p.velocity.w = ratio;
-    _Particles[id] = p;
+    StoreParticle(id, p);
 
     float compression = _PressureExponent == 3 ? ratio * ratio * ratio :
         (_PressureExponent == 1 ? ratio : pow(ratio, _PressureExponent));
@@ -254,7 +245,7 @@ void UpdateGrid(uint id : SV_DispatchThreadID)
 void UpdateParticles(uint id : SV_DispatchThreadID)
 {
     if (id >= (uint)_ParticleCount || _Diagnostics[0] != 0) return;
-    Particle p = _Particles[id];
+    Particle p = LoadParticle(id);
     int3 origin;
     float3 w[3];
     Weights(p.position.xyz, origin, w);
@@ -324,7 +315,7 @@ void UpdateParticles(uint id : SV_DispatchThreadID)
     p.affineX = float4(contact ? 0 : cx, 0);
     p.affineY = float4(contact ? 0 : cy, 0);
     p.affineZ = float4(contact ? 0 : cz, 0);
-    _Particles[id] = p;
+    StoreParticle(id, p);
 }
 
 float WhitewaterMass(int3 cell)
@@ -467,7 +458,7 @@ void UpdateWhitewater(uint id : SV_DispatchThreadID)
     if (p.position.w <= 0 && _WhitewaterEmission > 0)
     {
         uint seed = WhitewaterHash(id ^ ((uint)_WhitewaterStep * 747796405u));
-        Particle source = _Particles[seed % (uint)_ParticleCount];
+        Particle source = LoadParticle(seed % (uint)_ParticleCount);
         float4 flow = WhitewaterFlow(source.position.xyz);
         float3 normal;
         float gradientSize;
@@ -534,7 +525,7 @@ void ClearSortBins(uint id : SV_DispatchThreadID)
 void CountSortBins(uint id : SV_DispatchThreadID)
 {
     if (id >= (uint)_ParticleCount) return;
-    float3 position = _Particles[id].position.xyz;
+    float3 position = ParticlePosition(id).xyz;
     uint key = 0;
     if (all(isfinite(position)))
     {
@@ -579,13 +570,13 @@ void ScanSortBins(uint id : SV_GroupThreadID)
 void ScatterSortedParticles(uint id : SV_DispatchThreadID)
 {
     if (id >= (uint)_ParticleCount) return;
-    _SortedParticles[_SortBins[_SortKeys[id]] + _SortRanks[id]] = _Particles[id];
+    _SortedParticles[_SortBins[_SortKeys[id]] + _SortRanks[id]] = LoadParticle(id);
 }
 
 [numthreads(128, 1, 1)]
 void CopySortedParticles(uint id : SV_DispatchThreadID)
 {
-    if (id < (uint)_ParticleCount) _Particles[id] = _SortedParticles[id];
+    if (id < (uint)_ParticleCount) StoreParticle(id, _SortedParticles[id]);
 }
 
 #include "PbMpm.hlsl"

@@ -26,12 +26,13 @@ namespace WaterSplash.Tests
             fluid.transform.position = new Vector3(-2,0,-2);
             fluid.particleCount = 32768;
             fluid.gridResolution = 80;
-            fluid.substeps = 8;
+            fluid.substeps = BottleVoyage.SubstepsForParticleCount(fluid.particleCount);
             fluid.showParticles = fluid.showControls = false;
             // Edit-mode tests do not invoke Awake. Use the same scene-local binding.
             var configure = typeof(BottleBoundary).GetMethod("Configure",BindingFlags.Instance|BindingFlags.NonPublic);
             fluid.configureSimulation = (Action<CommandBuffer,ComputeShader>)Delegate.CreateDelegate(
                 typeof(Action<CommandBuffer,ComputeShader>),boundary,configure);
+            boundary.ConfigureGridWindow();
             fluid.Initialize();
             Assert.That(fluid.Error,Is.Null);
             Vector3[] positions = boundary.CreateInitialFill(fluid.particleCount,out float spacing);
@@ -63,15 +64,111 @@ namespace WaterSplash.Tests
                     fluid.GridOrigin+(Vector3)p.position*fluid.CellSize),out _),Is.LessThanOrEqualTo(1e-4f));
         }
 
+        [TestCase(false)]
+        [TestCase(true)]
+        public void CompactGridPreserves64KWorldLatticeLiquidAndWhitewater(bool mirrored)
+        {
+            boundary.mouthFacesLeft = mirrored;
+            fluid.particleCount = 65536;
+            fluid.substeps = BottleVoyage.SubstepsForParticleCount(fluid.particleCount);
+            boundary.compactGrid = false;
+            boundary.ConfigureGridWindow();
+            Vector3 origin = fluid.GridOrigin;
+            float cellSize = fluid.CellSize;
+            Vector3[] positions = boundary.CreateInitialFill(fluid.particleCount, out float spacing);
+            fluid.Initialize();
+            fluid.SetComparisonInitialPositions(positions, spacing);
+            var initial = ReadParticles();
+            fluid.StepSimulation(120);
+            var reference = ReadParticles();
+            var referenceWhitewater = fluid.CaptureWhitewaterSnapshot();
+            var referenceState = fluid.CaptureSnapshot();
+            Assert.That(referenceState.faults, Is.Zero);
+
+            boundary.compactGrid = true;
+            boundary.ConfigureGridWindow();
+            fluid.Initialize();
+            fluid.SetComparisonInitialPositions(positions, spacing);
+            Assert.That(fluid.GridOrigin, Is.EqualTo(origin));
+            Assert.That(fluid.CellSize, Is.EqualTo(cellSize));
+            Vector3Int size = fluid.GridDimensions;
+            Assert.That(size.x, Is.EqualTo(80));
+            Assert.That(size.x * size.y * size.z, Is.LessThanOrEqualTo(80 * 80 * 80 / 4));
+            Assert.That(fluid.GridWindow.zMin, Is.GreaterThan(0));
+            var imported = ReadParticles();
+            for (int i = 0; i < initial.Length; i++)
+                Assert.That(imported[i].position, Is.EqualTo(initial[i].position));
+            fluid.StepSimulation(120);
+            var compact = ReadParticles();
+            for (int i = 0; i < reference.Length; i++)
+            {
+                Assert.That(compact[i].position, Is.EqualTo(reference[i].position), "Particle " + i);
+                Assert.That(compact[i].velocity, Is.EqualTo(reference[i].velocity), "Velocity " + i);
+                Assert.That(compact[i].affineX, Is.EqualTo(reference[i].affineX));
+                Assert.That(compact[i].affineY, Is.EqualTo(reference[i].affineY));
+                Assert.That(compact[i].affineZ, Is.EqualTo(reference[i].affineZ));
+            }
+            var whitewater = fluid.CaptureWhitewaterSnapshot();
+            Assert.That(whitewater.born, Is.EqualTo(referenceWhitewater.born));
+            Assert.That(whitewater.foam, Is.EqualTo(referenceWhitewater.foam));
+            Assert.That(whitewater.spray, Is.EqualTo(referenceWhitewater.spray));
+            for (int i = 0; i < whitewater.states.Length; i++)
+            {
+                Assert.That(whitewater.states[i].position, Is.EqualTo(referenceWhitewater.states[i].position));
+                Assert.That(whitewater.states[i].velocity, Is.EqualTo(referenceWhitewater.states[i].velocity));
+                Assert.That(whitewater.states[i].normalType, Is.EqualTo(referenceWhitewater.states[i].normalType));
+            }
+            var state = fluid.CaptureSnapshot();
+            Assert.That(state.faults, Is.Zero);
+            Assert.That(state.outsideParticles, Is.Zero);
+            Assert.That(state.gridMass, Is.EqualTo(referenceState.gridMass));
+            Assert.That(state.peakDensityRatio, Is.EqualTo(referenceState.peakDensityRatio));
+            Assert.That(whitewater.nonFinite, Is.Zero);
+            Assert.That(whitewater.outside, Is.Zero);
+        }
+
+        [Test]
+        public void CompactGridHandlesPartialGroupsAndReportsNonFiniteParticles()
+        {
+            fluid.particleCount = 32769;
+            fluid.Initialize();
+            fluid.SetComparisonInitialPositions(boundary.CreateInitialFill(fluid.particleCount, out float spacing), spacing);
+            fluid.StepSimulation(10);
+            var state = fluid.CaptureSnapshot();
+            Assert.That(state.faults, Is.Zero);
+            Assert.That(state.peakDensityRatio, Is.GreaterThan(0));
+            Assert.That(state.maximumSpeed, Is.GreaterThan(0));
+            var particles = ReadParticles();
+            particles[particles.Length - 1].position.x = float.NaN;
+            UploadParticles(particles);
+            fluid.StepSimulation(1);
+            Assert.That(fluid.SynchronizeDiagnostics() & 1u, Is.EqualTo(1u));
+        }
+
+        [Test]
+        public void GridWindowChangesRequireResetAndRejectUnsupportedImports()
+        {
+            boundary.compactGrid = false;
+            boundary.ConfigureGridWindow();
+            Assert.Throws<InvalidOperationException>(() => fluid.StepSimulation(1));
+            boundary.compactGrid = true;
+            boundary.ConfigureGridWindow();
+            var positions = boundary.CreateInitialFill(fluid.particleCount, out float spacing);
+            positions[0] = fluid.GridOrigin + new Vector3(20, 50, 10) * fluid.CellSize;
+            Assert.Throws<ArgumentException>(() => fluid.SetComparisonInitialPositions(positions, spacing));
+        }
+
         [Test]
         [TestCase(16384)]
         [TestCase(32768)]
         [TestCase(65536)]
+        [TestCase(131072)]
         public void PresetsRetainReferenceWaterVolumeAndScaleSpacing(int count)
         {
             boundary.CreateInitialFill(32768,out float referenceSpacing);
             float referenceVolume=boundary.WaterVolume;
             fluid.particleCount=count;
+            fluid.substeps=BottleVoyage.SubstepsForParticleCount(count);
             fluid.Initialize();
             Vector3[] positions=boundary.CreateInitialFill(count,out float spacing);
             Assert.That(positions.Length,Is.EqualTo(count));
@@ -141,7 +238,6 @@ namespace WaterSplash.Tests
         [Test]
         public void GpuProjectsShoulderBottomAndCorkAndContainsSpray()
         {
-            ComputeBuffer buffer=ParticleBuffer();
             var states=ReadParticles();
             // Seed finite particles at the shoulder, rounded heel and cork plane,
             // including outward velocities. Keep all within the original grid.
@@ -155,7 +251,7 @@ namespace WaterSplash.Tests
                 Vector3 v=outward[i]*(2/fluid.CellSize);
                 states[i].velocity=new Vector4(v.x,v.y,v.z,0);
             }
-            buffer.SetData(states);
+            UploadParticles(states);
             var foamBuffer=(ComputeBuffer)typeof(MlsMpmFluid).GetField("whitewater",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(fluid);
             var whitewater=new MlsMpmFluid.WhitewaterState[fluid.whitewaterCapacity];
             for(int i=0;i<local.Length;i++)
@@ -177,16 +273,21 @@ namespace WaterSplash.Tests
                         Is.LessThanOrEqualTo(1e-4f));
         }
         [Test]
-        [TestCase(16384)]
-        [TestCase(32768)]
-        [TestCase(65536)]
-        public void FastBoatGesturesSweepHullAndGenerateSimulatedWhitewater(int count)
+        [TestCase(16384, false)]
+        [TestCase(32768, false)]
+        [TestCase(65536, false)]
+        [TestCase(131072, false)]
+        [TestCase(65536, true)]
+        [TestCase(131072, true)]
+        public void FastBoatGesturesSweepHullAndGenerateSimulatedWhitewater(int count, bool optimized)
         {
             var sphere=new GameObject("Fast hull");
             var boat=new GameObject("Immediate visual boat");
             try
             {
                 fluid.particleCount=count;
+                fluid.useParticleSoA = fluid.cacheGridBoundary = optimized;
+                fluid.substeps=BottleVoyage.SubstepsForParticleCount(count);
                 fluid.sphereObstacle=sphere.transform;
                 fluid.sphereRadius=.12f;
                 fluid.whitewaterCapacity=8192;
@@ -264,9 +365,103 @@ namespace WaterSplash.Tests
         }
         ComputeBuffer ParticleBuffer()=>(ComputeBuffer)typeof(MlsMpmFluid).GetProperty("ParticleBuffer",
             BindingFlags.Instance|BindingFlags.NonPublic).GetValue(fluid);
-        MlsMpmFluid.ParticleState[] ReadParticles()
+        void UploadParticles(MlsMpmFluid.ParticleState[] states) =>
+            typeof(MlsMpmFluid).GetMethod("UploadParticles", BindingFlags.Instance | BindingFlags.NonPublic)
+                .Invoke(fluid, new object[] { states });
+        MlsMpmFluid.ParticleState[] ReadParticles() => fluid.CaptureParticleStates();
+
+        [TestCase(true, false, false)]
+        [TestCase(false, true, false)]
+        [TestCase(true, true, false)]
+        [TestCase(true, true, true)]
+        public void CachedBoundaryAndSoAPreserve64KLiquidAndWhitewater(bool cache, bool soa, bool mirrored)
         {
-            var states=new MlsMpmFluid.ParticleState[fluid.particleCount];ParticleBuffer().GetData(states);return states;
+            fluid.particleCount = 65536;
+            boundary.mouthFacesLeft = mirrored;
+            Vector3[] positions = boundary.CreateInitialFill(fluid.particleCount, out float spacing);
+            fluid.Initialize();
+            fluid.SetComparisonInitialPositions(positions, spacing);
+            fluid.StepSimulation(60);
+            var reference = ReadParticles();
+            var referenceFoam = fluid.CaptureWhitewaterSnapshot();
+            fluid.cacheGridBoundary = cache;
+            fluid.useParticleSoA = soa;
+            fluid.Initialize();
+            fluid.SetComparisonInitialPositions(positions, spacing);
+            fluid.StepSimulation(60);
+            var actual = ReadParticles();
+            for (int i = 0; i < actual.Length; i++)
+            {
+                Assert.That(actual[i].position, Is.EqualTo(reference[i].position), "position " + i);
+                Assert.That(actual[i].velocity, Is.EqualTo(reference[i].velocity), "velocity " + i);
+                Assert.That(actual[i].affineX, Is.EqualTo(reference[i].affineX), "affineX " + i);
+                Assert.That(actual[i].affineY, Is.EqualTo(reference[i].affineY), "affineY " + i);
+                Assert.That(actual[i].affineZ, Is.EqualTo(reference[i].affineZ), "affineZ " + i);
+            }
+            var foam = fluid.CaptureWhitewaterSnapshot();
+            for (int i = 0; i < foam.states.Length; i++)
+            {
+                Assert.That(foam.states[i].position, Is.EqualTo(referenceFoam.states[i].position));
+                Assert.That(foam.states[i].velocity, Is.EqualTo(referenceFoam.states[i].velocity));
+                Assert.That(foam.states[i].normalType, Is.EqualTo(referenceFoam.states[i].normalType));
+            }
+            Assert.That(fluid.CaptureSnapshot().faults, Is.Zero);
+            Assert.That(foam.outside, Is.Zero);
+            Assert.That(foam.nonFinite, Is.Zero);
+        }
+
+        [Test]
+        public void CachedBoundaryRefreshesAfterOriginCenterAndAxisChange()
+        {
+            fluid.cacheGridBoundary = true;
+            fluid.Initialize();
+            fluid.SetComparisonInitialPositions(boundary.CreateInitialFill(fluid.particleCount, out float spacing), spacing);
+            fluid.StepSimulation(1);
+            boundary.center += new Vector3(.01f, .02f, .03f);
+            fluid.transform.position += new Vector3(.004f, .003f, .002f);
+            boundary.mouthFacesLeft = true;
+            var shader = (ComputeShader)typeof(MlsMpmFluid).GetField("solver",
+                BindingFlags.Instance | BindingFlags.NonPublic).GetValue(fluid);
+            using (var commands = new CommandBuffer())
+            {
+                fluid.configureSimulation(commands, shader);
+                Graphics.ExecuteCommandBuffer(commands);
+            }
+            var buffer = (ComputeBuffer)typeof(MlsMpmFluid).GetField("staticGridBoundary",
+                BindingFlags.Instance | BindingFlags.NonPublic).GetValue(fluid);
+            var values = new Vector4[buffer.count];
+            buffer.GetData(values);
+            Vector3Int size = fluid.GridDimensions;
+            for (int i = 0; i < values.Length; i += 997)
+            {
+                Vector3 cell = (Vector3)fluid.GridWindow.position +
+                    new Vector3(i % size.x, i / size.x % size.y, i / (size.x * size.y));
+                Vector3 world = fluid.GridOrigin + cell * fluid.CellSize;
+                float distance = BottleBoundary.Distance(boundary.ToProfile(world), out Vector3 normal);
+                normal.x *= boundary.AxisSign;
+                Assert.That(values[i].w, Is.EqualTo(distance / fluid.CellSize).Within(.0002));
+                Assert.That(((Vector3)values[i] - normal).magnitude, Is.LessThan(.0002));
+            }
+            fluid.Release();
+            Assert.That(typeof(MlsMpmFluid).GetField("staticGridBoundary",
+                BindingFlags.Instance | BindingFlags.NonPublic).GetValue(fluid), Is.Null);
+        }
+
+        [Test]
+        public void SoAPartialGroupDiagnosticsAndLayoutChangesRemainExplicit()
+        {
+            fluid.useParticleSoA = fluid.cacheGridBoundary = true;
+            fluid.particleCount = 32769;
+            fluid.Initialize();
+            fluid.SetComparisonInitialPositions(boundary.CreateInitialFill(fluid.particleCount, out float spacing), spacing);
+            fluid.StepSimulation(5);
+            var states = ReadParticles();
+            states[states.Length - 1].affineZ.x = float.NaN;
+            UploadParticles(states);
+            fluid.StepSimulation(1);
+            Assert.That(fluid.SynchronizeDiagnostics() & 1u, Is.EqualTo(1u));
+            fluid.useParticleSoA = false;
+            Assert.Throws<InvalidOperationException>(() => fluid.StepSimulation(1));
         }
         void AssertInside(MlsMpmFluid.ParticleState[] states)
         {

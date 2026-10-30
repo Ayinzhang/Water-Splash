@@ -88,3 +88,4 @@ MonoBehaviour:
   surfaceSmoothing: 2.5
   continuousFoam: 1
   detailedWhitewater: 1
+  cropToFluidBounds: 1

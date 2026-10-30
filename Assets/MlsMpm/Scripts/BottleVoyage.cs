@@ -82,10 +82,12 @@ namespace WaterSplash
             resetRequested = false;
             generation++;
             fluid.particleCount = requestedParticleCount;
+            fluid.substeps = SubstepsForParticleCount(requestedParticleCount);
             boat.SetPositionAndRotation(initialBoatPosition, heading);
             desiredPosition = boatTarget = initialBoatPosition;
             desiredNormal = Vector3.up;
             fluid.sphereObstacle.position = HullCenter();
+            boundary.ConfigureGridWindow();
             fluid.Initialize();
             if (fluid.Error != null) { Fail(fluid.Error); return; }
             Vector3[] positions = boundary.CreateInitialFill(fluid.particleCount, out float spacing);
@@ -127,6 +129,8 @@ namespace WaterSplash
         }
 
         public void ToggleRendering() => SetSurfaceRendering(!fluid.renderSurface);
+
+        public static int SubstepsForParticleCount(int count) => count >= 131072 ? 8 : 6;
 
         void Update()
         {
@@ -213,6 +217,7 @@ namespace WaterSplash
             probe.SetFloat("_SurfaceOffset", fluid.SurfaceParticleRadius * .5f);
             probe.SetInt("_ParticleCount", fluid.RenderedParticleCount);
             probe.SetBuffer(collectKernel, "_Particles", fluid.ParticleBuffer);
+            probe.SetInt("_ParticlePlaneStride", fluid.ParticlePlaneStride);
             probe.Dispatch(collectKernel, blocks, 5, 1);
             probe.Dispatch(reduceKernel, 5, 1, 1);
             pending = true;

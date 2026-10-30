@@ -70,8 +70,10 @@ namespace WaterSplash.Editor
             fluid.particleCount = 32768;
             fluid.gridResolution = 80;
             fluid.domainSize = 4;
-            fluid.substeps = 8;
+            fluid.substeps = BottleVoyage.SubstepsForParticleCount(fluid.particleCount);
             fluid.solverMethod = MlsMpmFluid.SolverMethod.MlsMpm;
+            fluid.useParticleSoA = true;
+            fluid.cacheGridBoundary = true;
             fluid.surfaceQuality = MlsMpmFluid.SurfaceQuality.High;
             fluid.sphereRadius = .12f;
             fluid.sphereObstacle.position = new Vector3(.20f*boundary.AxisSign,.49f,0);
