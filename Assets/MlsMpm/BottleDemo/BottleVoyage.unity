@@ -2189,6 +2189,10 @@ MonoBehaviour:
   enableWhitewater: 1
   useParticleSoA: 1
   cacheGridBoundary: 1
+  reduceDiagnosticAtomics: 1
+  groupSizeMode: 1
+  p2gMode: 3
+  mlsSortInterval: 0
   spatialSortInterval: 0
   solverMethod: 0
   positionIterations: 2
@@ -13515,6 +13519,7 @@ MonoBehaviour:
   fillHeight: 0.73
   mouthFacesLeft: 1
   compactGrid: 1
+  tightGrid: 1
 --- !u!1 &1395055841
 GameObject:
   m_ObjectHideFlags: 0

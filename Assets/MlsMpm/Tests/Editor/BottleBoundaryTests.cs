@@ -287,6 +287,8 @@ namespace WaterSplash.Tests
             {
                 fluid.particleCount=count;
                 fluid.useParticleSoA = fluid.cacheGridBoundary = optimized;
+                fluid.reduceDiagnosticAtomics = boundary.tightGrid = optimized;
+                boundary.ConfigureGridWindow();
                 fluid.substeps=BottleVoyage.SubstepsForParticleCount(count);
                 fluid.sphereObstacle=sphere.transform;
                 fluid.sphereRadius=.12f;
@@ -463,6 +465,361 @@ namespace WaterSplash.Tests
             fluid.useParticleSoA = false;
             Assert.Throws<InvalidOperationException>(() => fluid.StepSimulation(1));
         }
+
+        [TestCase(false, 16384)]
+        [TestCase(false, 32768)]
+        [TestCase(false, 65536)]
+        [TestCase(false, 131072)]
+        [TestCase(true, 65536)]
+        [TestCase(true, 131072)]
+        public void TightGridContainsAllNonzeroTransferNodesAcrossTheFullBottle(bool mirrored, int count)
+        {
+            fluid.particleCount = count;
+            boundary.mouthFacesLeft = mirrored;
+            boundary.tightGrid = true;
+            boundary.CreateInitialFill(count, out float spacing);
+            boundary.ConfigureGridWindow();
+            Assert.That(fluid.GridDimensions, Is.EqualTo(new Vector3Int(80, 30, 30)));
+            // Particle projection keeps liquid/whitewater at least this far inside the full profile.
+            foreach (Vector2 section in BottleBoundary.Profile)
+            for (int i = 0; i < 128; i++)
+            {
+                float angle = i * 2 * Mathf.PI / 128;
+                float radial = Mathf.Max(0, section.y - .75f * spacing);
+                Vector3 world = boundary.FromProfile(new Vector3(section.x,
+                    radial * Mathf.Cos(angle), radial * Mathf.Sin(angle)));
+                Vector3 p = (world - fluid.GridOrigin) / fluid.CellSize;
+                Vector3Int support = Vector3Int.FloorToInt(p - Vector3.one * .5f);
+                for (int z = 0; z < 3; z++)
+                for (int y = 0; y < 3; y++)
+                for (int x = 0; x < 3; x++)
+                    Assert.That(fluid.GridWindow.Contains(support + new Vector3Int(x, y, z)), Is.True);
+            }
+        }
+
+        [Test]
+        public void TightGridRejectsParticleSpacingThatWouldTruncateSupport()
+        {
+            fluid.particleCount = 262144;
+            boundary.tightGrid = true;
+            Assert.Throws<InvalidOperationException>(() => boundary.ConfigureGridWindow());
+        }
+
+        [TestCase(false, true, false)]
+        [TestCase(true, false, false)]
+        [TestCase(true, true, false)]
+        [TestCase(true, true, true)]
+        public void TightGridAndReducedDiagnosticsPreserveMoving64KStatesAndPeaks(
+            bool tight, bool reduced, bool mirrored)
+        {
+            fluid.particleCount = 65536;
+            fluid.useParticleSoA = fluid.cacheGridBoundary = true;
+            fluid.whitewaterCapacity = 8192;
+            boundary.mouthFacesLeft = mirrored;
+            Vector3[] positions = boundary.CreateInitialFill(fluid.particleCount, out float spacing);
+            var hull = new GameObject("Diagnostic comparison hull");
+            try
+            {
+                fluid.sphereObstacle = hull.transform;
+                fluid.sphereRadius = .12f;
+                MlsMpmFluid.ParticleState[] reference = null;
+                MlsMpmFluid.WhitewaterSnapshot referenceFoam = null;
+                uint[] referenceDiagnostics = null;
+                for (int run = 0; run < 2; run++)
+                {
+                    boundary.tightGrid = run == 1 && tight;
+                    fluid.reduceDiagnosticAtomics = run == 1 && reduced;
+                    boundary.ConfigureGridWindow();
+                    hull.transform.position = boundary.ClampInside(new Vector3(-.7f, .55f, 0), .16f);
+                    fluid.Initialize();
+                    fluid.SetComparisonInitialPositions(positions, spacing);
+                    for (int tick = 0; tick < 240; tick++)
+                    {
+                        Vector3 target = tick / 24 % 2 == 0 ? new Vector3(.1f, .55f, .18f) :
+                            new Vector3(-1, .55f, -.18f);
+                        hull.transform.position = Vector3.MoveTowards(hull.transform.position,
+                            boundary.ClampInside(target, .16f), .25f * fluid.CellSize * fluid.substeps);
+                        fluid.StepSimulation(1);
+                    }
+                    var states = ReadParticles();
+                    var foam = fluid.CaptureWhitewaterSnapshot();
+                    var diagnostics = (ComputeBuffer)typeof(MlsMpmFluid).GetField("diagnostics",
+                        BindingFlags.Instance | BindingFlags.NonPublic).GetValue(fluid);
+                    var values = new uint[8];
+                    diagnostics.GetData(values);
+                    Assert.That(values[0], Is.Zero);
+                    Assert.That(foam.nonFinite, Is.Zero);
+                    Assert.That(foam.outside, Is.Zero);
+                    if (run == 0)
+                    {
+                        reference = states;
+                        referenceFoam = foam;
+                        referenceDiagnostics = values;
+                        continue;
+                    }
+                    Assert.That(values, Is.EqualTo(referenceDiagnostics), "All peaks, fault fields and counters");
+                    Assert.That(values[1], Is.GreaterThan(0));
+                    Assert.That(values[2], Is.GreaterThan(0));
+                    Assert.That(foam.born, Is.GreaterThan(0), "Comparison must exercise whitewater");
+                    for (int i = 0; i < states.Length; i++)
+                    {
+                        Assert.That(states[i].position, Is.EqualTo(reference[i].position), "position " + i);
+                        Assert.That(states[i].velocity, Is.EqualTo(reference[i].velocity), "velocity " + i);
+                        Assert.That(states[i].affineX, Is.EqualTo(reference[i].affineX));
+                        Assert.That(states[i].affineY, Is.EqualTo(reference[i].affineY));
+                        Assert.That(states[i].affineZ, Is.EqualTo(reference[i].affineZ));
+                    }
+                    for (int i = 0; i < foam.states.Length; i++)
+                    {
+                        Assert.That(foam.states[i].position, Is.EqualTo(referenceFoam.states[i].position));
+                        Assert.That(foam.states[i].velocity, Is.EqualTo(referenceFoam.states[i].velocity));
+                        Assert.That(foam.states[i].normalType, Is.EqualTo(referenceFoam.states[i].normalType));
+                    }
+                }
+            }
+            finally { UnityEngine.Object.DestroyImmediate(hull); }
+        }
+
+        [TestCase(16385)]
+        [TestCase(65536)]
+        public void WorkgroupSize64MatchesSize128Exactly(int count)
+        {
+            fluid.particleCount = count;
+            fluid.useParticleSoA = fluid.cacheGridBoundary = fluid.reduceDiagnosticAtomics = true;
+            fluid.whitewaterCapacity = 8192;
+            boundary.tightGrid = true;
+            boundary.ConfigureGridWindow();
+            Vector3[] positions = boundary.CreateInitialFill(count, out float spacing);
+            var hull = new GameObject("Workgroup comparison hull");
+            try
+            {
+                fluid.sphereObstacle = hull.transform;
+                fluid.sphereRadius = .12f;
+                MlsMpmFluid.ParticleState[] reference = null;
+                uint[] referenceDiagnostics = null;
+                foreach (var mode in new[] { MlsMpmFluid.GroupSizeMode.Fixed128, MlsMpmFluid.GroupSizeMode.Fixed64 })
+                {
+                    fluid.groupSizeMode = mode;
+                    hull.transform.position = boundary.ClampInside(new Vector3(-.7f, .55f, 0), .16f);
+                    fluid.Initialize();
+                    Assert.That(fluid.GroupSizeSummary, Is.EqualTo(mode == MlsMpmFluid.GroupSizeMode.Fixed64 ?
+                        "64/64/64/64/64" : "128/128/128/128/128"));
+                    fluid.SetComparisonInitialPositions(positions, spacing);
+                    for (int tick = 0; tick < 90; tick++)
+                    {
+                        Vector3 target = tick / 24 % 2 == 0 ? new Vector3(.1f, .55f, .18f) : new Vector3(-1, .55f, -.18f);
+                        hull.transform.position = Vector3.MoveTowards(hull.transform.position,
+                            boundary.ClampInside(target, .16f), .25f * fluid.CellSize * fluid.substeps);
+                        fluid.StepSimulation(1);
+                    }
+                    var states = ReadParticles();
+                    var diagnostics = (ComputeBuffer)typeof(MlsMpmFluid).GetField("diagnostics",
+                        BindingFlags.Instance | BindingFlags.NonPublic).GetValue(fluid);
+                    var values = new uint[8];
+                    diagnostics.GetData(values);
+                    Assert.That(values[0], Is.Zero);
+                    if (reference == null)
+                    {
+                        reference = states;
+                        referenceDiagnostics = values;
+                        continue;
+                    }
+                    Assert.That(values, Is.EqualTo(referenceDiagnostics), "Peaks and counters");
+                    for (int i = 0; i < states.Length; i++)
+                    {
+                        Assert.That(states[i].position, Is.EqualTo(reference[i].position), "position " + i);
+                        Assert.That(states[i].velocity, Is.EqualTo(reference[i].velocity), "velocity " + i);
+                        Assert.That(states[i].affineX, Is.EqualTo(reference[i].affineX));
+                        Assert.That(states[i].affineY, Is.EqualTo(reference[i].affineY));
+                        Assert.That(states[i].affineZ, Is.EqualTo(reference[i].affineZ));
+                    }
+                }
+            }
+            finally { UnityEngine.Object.DestroyImmediate(hull); }
+        }
+
+        [Test]
+        public void AutoWorkgroupSizeStaysAt128InEditor()
+        {
+            fluid.groupSizeMode = MlsMpmFluid.GroupSizeMode.Auto;
+            fluid.Initialize();
+            Assert.That(fluid.IsCalibrating, Is.False);
+            Assert.That(fluid.GroupSizeSummary, Is.EqualTo("128/128/128/128/128"));
+            Assert.That(fluid.StartGroupSizeCalibration(), Is.False, "Calibration requires play mode");
+            Assert.That(fluid.StartP2gBenchmark(), Is.False, "Benchmark requires play mode");
+        }
+
+        struct P2gRun
+        {
+            public MlsMpmFluid.ParticleState[] states;
+            public uint[] diagnostics;
+            public Vector3 meanPosition;
+            public float meanSpeed;
+        }
+
+        P2gRun RunP2gMode(MlsMpmFluid.P2gMode mode, int sortInterval, int ticks, Vector3[] positions, float spacing,
+            Transform hull)
+        {
+            fluid.p2gMode = mode;
+            fluid.mlsSortInterval = sortInterval;
+            hull.position = boundary.ClampInside(new Vector3(-.7f, .55f, 0), .16f);
+            fluid.Initialize();
+            Assert.That(fluid.ActiveP2gMode, Is.EqualTo(mode));
+            fluid.SetComparisonInitialPositions(positions, spacing);
+            for (int tick = 0; tick < ticks; tick++)
+            {
+                Vector3 target = tick / 24 % 2 == 0 ? new Vector3(.1f, .55f, .18f) : new Vector3(-1, .55f, -.18f);
+                hull.position = Vector3.MoveTowards(hull.position,
+                    boundary.ClampInside(target, .16f), .25f * fluid.CellSize * fluid.substeps);
+                fluid.StepSimulation(1);
+            }
+            var run = new P2gRun { states = ReadParticles(), diagnostics = new uint[8] };
+            var diagnostics = (ComputeBuffer)typeof(MlsMpmFluid).GetField("diagnostics",
+                BindingFlags.Instance | BindingFlags.NonPublic).GetValue(fluid);
+            diagnostics.GetData(run.diagnostics);
+            foreach (var s in run.states)
+            {
+                run.meanPosition += (Vector3)s.position;
+                run.meanSpeed += ((Vector3)s.velocity).magnitude;
+            }
+            run.meanPosition /= run.states.Length;
+            run.meanSpeed /= run.states.Length;
+            return run;
+        }
+
+        void ConfigureP2gComparison(int count)
+        {
+            fluid.particleCount = count;
+            fluid.useParticleSoA = fluid.cacheGridBoundary = fluid.reduceDiagnosticAtomics = true;
+            fluid.whitewaterCapacity = 8192;
+            boundary.tightGrid = true;
+            boundary.ConfigureGridWindow();
+        }
+
+        [Test]
+        public void UncheckedP2gAtomicsMatchTwoPassExactly()
+        {
+            ConfigureP2gComparison(65536);
+            Vector3[] positions = boundary.CreateInitialFill(fluid.particleCount, out float spacing);
+            var hull = new GameObject("P2G comparison hull");
+            try
+            {
+                fluid.sphereObstacle = hull.transform;
+                fluid.sphereRadius = .12f;
+                P2gRun reference = RunP2gMode(MlsMpmFluid.P2gMode.TwoPass, 0, 90, positions, spacing, hull.transform);
+                P2gRun run = RunP2gMode(MlsMpmFluid.P2gMode.TwoPassUnchecked, 0, 90, positions, spacing, hull.transform);
+                Assert.That(reference.diagnostics[0], Is.Zero);
+                Assert.That(run.diagnostics, Is.EqualTo(reference.diagnostics));
+                for (int i = 0; i < run.states.Length; i++)
+                {
+                    Assert.That(run.states[i].position, Is.EqualTo(reference.states[i].position), "position " + i);
+                    Assert.That(run.states[i].velocity, Is.EqualTo(reference.states[i].velocity), "velocity " + i);
+                    Assert.That(run.states[i].affineX, Is.EqualTo(reference.states[i].affineX));
+                }
+            }
+            finally { UnityEngine.Object.DestroyImmediate(hull); }
+        }
+
+        [TestCase(MlsMpmFluid.P2gMode.TwoPass, 1)]
+        [TestCase(MlsMpmFluid.P2gMode.Fused, 0)]
+        [TestCase(MlsMpmFluid.P2gMode.FusedPacked16, 0)]
+        [TestCase(MlsMpmFluid.P2gMode.FusedPacked16, 4)]
+        public void P2gVariantsStayStableAndCloseToTwoPass(MlsMpmFluid.P2gMode mode, int sortInterval)
+        {
+            ConfigureP2gComparison(65536);
+            Vector3[] positions = boundary.CreateInitialFill(fluid.particleCount, out float spacing);
+            var hull = new GameObject("P2G comparison hull");
+            try
+            {
+                fluid.sphereObstacle = hull.transform;
+                fluid.sphereRadius = .12f;
+                P2gRun reference = RunP2gMode(MlsMpmFluid.P2gMode.TwoPass, 0, 240, positions, spacing, hull.transform);
+                P2gRun run = RunP2gMode(mode, sortInterval, 240, positions, spacing, hull.transform);
+                Assert.That(run.diagnostics[0], Is.Zero, "No faults");
+                foreach (var s in run.states)
+                    Assert.That(float.IsNaN(s.position.x) || float.IsNaN(s.velocity.x), Is.False);
+                float densityRef = reference.diagnostics[1] / 1024f, density = run.diagnostics[1] / 1024f;
+                Debug.Log($"P2G {mode} sort={sortInterval}: meanPos {run.meanPosition} vs {reference.meanPosition}, " +
+                    $"meanSpeed {run.meanSpeed:F3} vs {reference.meanSpeed:F3}, densityPeak {density:F3} vs {densityRef:F3}");
+                Assert.That(Vector3.Distance(run.meanPosition, reference.meanPosition), Is.LessThan(.5f), "Mean position (cells)");
+                Assert.That(density, Is.EqualTo(densityRef).Within(.2f * densityRef), "Peak density ratio");
+                Assert.That(run.meanSpeed, Is.EqualTo(reference.meanSpeed).Within(.35f * reference.meanSpeed + .05f));
+            }
+            finally { UnityEngine.Object.DestroyImmediate(hull); }
+        }
+
+        [TestCase(16385)]
+        [TestCase(32769)]
+        public void ReducedDiagnosticsHandleTailLanesAndFaultsWithoutStrandingBarriers(int count)
+        {
+            fluid.particleCount = count;
+            fluid.useParticleSoA = fluid.cacheGridBoundary = fluid.reduceDiagnosticAtomics = true;
+            boundary.tightGrid = true;
+            boundary.ConfigureGridWindow();
+            fluid.Initialize();
+            fluid.SetComparisonInitialPositions(boundary.CreateInitialFill(count, out float spacing), spacing);
+            fluid.StepSimulation(5);
+            Assert.That(fluid.SynchronizeDiagnostics(), Is.Zero);
+            var states = ReadParticles();
+            states[count - 1].position.x = float.NaN;
+            UploadParticles(states);
+            fluid.StepSimulation(1);
+            Assert.That(fluid.SynchronizeDiagnostics() & 1u, Is.EqualTo(1u));
+        }
+
+        [TestCase(1)]
+        [TestCase(2)]
+        [TestCase(4)]
+        [TestCase(8)]
+        [TestCase(16)]
+        public void ReducedDiagnosticsKeepStressAndGatherFailurePathsBarrierSafe(int flag)
+        {
+            fluid.particleCount = 513;
+            fluid.reduceDiagnosticAtomics = true;
+            fluid.useParticleSoA = true;
+            fluid.Initialize();
+            fluid.SetComparisonInitialPositions(boundary.CreateInitialFill(513, out float spacing), spacing);
+            var shader = (ComputeShader)typeof(MlsMpmFluid).GetField("solver",
+                BindingFlags.Instance | BindingFlags.NonPublic).GetValue(fluid);
+            var diagnostics = (ComputeBuffer)typeof(MlsMpmFluid).GetField("diagnostics",
+                BindingFlags.Instance | BindingFlags.NonPublic).GetValue(fluid);
+            var grid = (ComputeBuffer)typeof(MlsMpmFluid).GetField("grid",
+                BindingFlags.Instance | BindingFlags.NonPublic).GetValue(fluid);
+            var states = ReadParticles();
+            bool stress = flag == 2 || flag == 4 || flag == 8;
+            if (flag == 4)
+                for (int i = 0; i < states.Length; i++) states[i].position.x = -100;
+            if (flag == 2)
+            {
+                for (int i = 0; i < states.Length; i++) states[i].affineX.x = 1e10f;
+                shader.SetFloat("_Viscosity", 1e10f);
+                var accumulation = (ComputeBuffer)typeof(MlsMpmFluid).GetField("accumulation",
+                    BindingFlags.Instance | BindingFlags.NonPublic).GetValue(fluid);
+                var massValues = new int[accumulation.count];
+                for (int i = 0; i < massValues.Length; i += 4)
+                    massValues[i] = Mathf.RoundToInt(fluid.RestDensity * 65536);
+                accumulation.SetData(massValues);
+            }
+            UploadParticles(states);
+            if (!stress)
+            {
+                var cells = new Vector4[grid.count];
+                for (int i = 0; i < cells.Length; i++)
+                    cells[i] = flag == 1 ? new Vector4(float.NaN, 0, 0, 1) : new Vector4(1000, 0, 0, 1);
+                grid.SetData(cells);
+            }
+            shader.SetInt("_ParticleCount", 513);
+            shader.SetInt("_Resolution", fluid.gridResolution);
+            shader.SetInt("_ReduceDiagnosticAtomics", 1);
+            shader.SetFloat("_RestDensity", fluid.RestDensity);
+            shader.SetFloat("_Dt", (float)(MlsMpmFluid.FixedTick / fluid.substeps));
+            shader.Dispatch(shader.FindKernel(stress ? "TransferStress" : "UpdateParticles"), 5, 1, 1);
+            var values = new uint[8];
+            diagnostics.GetData(values);
+            Assert.That(values[0] & (uint)flag, Is.EqualTo((uint)flag));
+            if (flag == 16) Assert.That(values[2], Is.GreaterThan(0), "Displacement faults retain the speed peak");
+        }
+
         void AssertInside(MlsMpmFluid.ParticleState[] states)
         {
             int outside=0;float maximum=float.NegativeInfinity;

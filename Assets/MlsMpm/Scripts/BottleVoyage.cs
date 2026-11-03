@@ -83,6 +83,9 @@ namespace WaterSplash
             generation++;
             fluid.particleCount = requestedParticleCount;
             fluid.substeps = SubstepsForParticleCount(requestedParticleCount);
+            fluid.reduceDiagnosticAtomics = true;
+            fluid.groupSizeMode = MlsMpmFluid.GroupSizeMode.Auto;
+            boundary.tightGrid = true;
             boat.SetPositionAndRotation(initialBoatPosition, heading);
             desiredPosition = boatTarget = initialBoatPosition;
             desiredNormal = Vector3.up;
@@ -93,6 +96,12 @@ namespace WaterSplash
             Vector3[] positions = boundary.CreateInitialFill(fluid.particleCount, out float spacing);
             fluid.SetComparisonInitialPositions(positions, spacing);
             fluid.particleRadiusScale = spacing * .34f / fluid.CellSize;
+            if (Debug.isDebugBuild)
+                Debug.Log($"Bottle MPM config: particles={fluid.particleCount}, grid={fluid.GridDimensions}, " +
+                    $"substeps={fluid.substeps}, diagnosticReduction={fluid.reduceDiagnosticAtomics}, " +
+                    $"tightGrid={boundary.tightGrid}, soa={fluid.useParticleSoA}, cachedWall={fluid.cacheGridBoundary}, " +
+                    $"groups={fluid.GroupSizeSummary}{(fluid.IsCalibrating ? " (calibrating)" : "")}, " +
+                    $"p2g={fluid.ActiveP2gMode}, mlsSort={fluid.mlsSortInterval}", this);
             int nextBlocks = (fluid.particleCount + 127) / 128;
             if (partials == null || blocks != nextBlocks)
             {
@@ -144,7 +153,7 @@ namespace WaterSplash
                 return;
             }
             meanFrame = Mathf.Lerp(meanFrame, Time.unscaledDeltaTime, .03f);
-            if (fluid.paused || suspended) { skipDelta = true; dragging = false; return; }
+            if (fluid.paused || suspended || fluid.IsCalibrating) { skipDelta = true; dragging = false; return; }
             UpdatePointer();
             if (skipDelta) { skipDelta = false; return; }
             float dt = Time.unscaledDeltaTime;
@@ -344,7 +353,8 @@ namespace WaterSplash
         static Rect ControlsRect(float scale)
         {
             Rect safe = Screen.safeArea;
-            return new Rect(safe.xMax / scale - 456, (Screen.height - safe.yMin) / scale - 78, 420, 72);
+            float extra = Debug.isDebugBuild ? 36 : 0;
+            return new Rect(safe.xMax / scale - 456, (Screen.height - safe.yMin) / scale - 78 - extra, 420, 72 + extra);
         }
 
         static bool Choice(Rect rect, string text, bool selected)
@@ -381,13 +391,20 @@ namespace WaterSplash
                 "DRAG THE SAILBOAT     /     SPACE TO PAUSE     /     R TO RESET", footStyle);
             if (Debug.isDebugBuild)
                 GUI.Label(new Rect(x, bottom - 22, 750, 25), string.Format(
-                    "{0}K MLS-MPM   |   {1:F0} FPS   |   backlog {2:F3}s   |   water {3:F3}",
+                    "{0}K MLS-MPM | {1:F0} FPS | {2} steps | {3} | groups {5} | p2g {6} sort {7} | backlog {4:F3}s",
                     fluid == null ? 0 : fluid.particleCount / 1024,
-                    meanFrame > 0 ? 1 / meanFrame : 0, backlog, boundary == null ? 0 : boundary.WaterVolume), footStyle);
+                    meanFrame > 0 ? 1 / meanFrame : 0, fluid == null ? 0 : fluid.substeps,
+                    fluid == null ? Vector3Int.zero : fluid.GridDimensions, backlog,
+                    fluid == null ? "-" : fluid.GroupSizeSummary,
+                    fluid == null ? "-" : fluid.ActiveP2gMode.ToString(), fluid == null ? 0 : fluid.mlsSortInterval), footStyle);
+            if (ready && Error == null && fluid.IsCalibrating)
+                GUI.Label(new Rect(x, bottom - 44, 750, 25), string.Format(fluid.IsBenchmarkingP2g ?
+                    "Benchmarking P2G modes  {0:P0}" : "Tuning compute for this GPU  {0:P0}  (first launch only)",
+                    fluid.CalibrationProgress), footStyle);
             if (ready && Error == null)
             {
                 Rect controls = ControlsRect(scale);
-                float bx = controls.x, by = controls.y;
+                float bx = controls.x, by = controls.yMax - 66;
                 if (Choice(new Rect(bx, by, 64, 30), "16K", fluid.particleCount == 16384)) SelectParticleCount(16384);
                 if (Choice(new Rect(bx + 70, by, 64, 30), "32K", fluid.particleCount == 32768)) SelectParticleCount(32768);
                 if (Choice(new Rect(bx + 140, by, 64, 30), "64K", fluid.particleCount == 65536)) SelectParticleCount(65536);
@@ -396,6 +413,18 @@ namespace WaterSplash
                 if (GUI.Button(new Rect(bx + 216, by + 36, 96, 30), fluid.paused ? "Resume" : "Pause"))
                     fluid.paused = !fluid.paused;
                 if (GUI.Button(new Rect(bx + 318, by + 36, 96, 30), "Begin again")) ResetWater();
+                if (Debug.isDebugBuild && !fluid.IsCalibrating &&
+                    GUI.Button(new Rect(bx, by + 36, 204, 30), "Measure GPU kernels"))
+                    fluid.StartGroupSizeCalibration(3);
+                if (Debug.isDebugBuild && !fluid.IsCalibrating)
+                {
+                    if (GUI.Button(new Rect(bx, by - 36, 98, 30), "Bench P2G")) fluid.StartP2gBenchmark(3);
+                    if (GUI.Button(new Rect(bx + 106, by - 36, 98, 30),
+                        fluid.mlsSortInterval == 0 ? "Sort off" : "Sort /" + fluid.mlsSortInterval))
+                        fluid.mlsSortInterval = fluid.mlsSortInterval == 0 ? 1 : fluid.mlsSortInterval == 1 ? 4 : 0;
+                    if (GUI.Button(new Rect(bx + 216, by - 36, 198, 30), "P2G  " + fluid.p2gMode))
+                        fluid.p2gMode = (MlsMpmFluid.P2gMode)(((int)fluid.p2gMode + 1) % 4);
+                }
             }
             GUI.matrix = previous;
         }

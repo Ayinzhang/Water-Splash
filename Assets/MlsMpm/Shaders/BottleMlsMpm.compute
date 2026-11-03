@@ -19,6 +19,14 @@
 #pragma kernel PbIntegrate
 #pragma kernel PbExportGrid
 #pragma kernel CacheBottleBoundary
+#pragma kernel ClearGrid64
+#pragma kernel TransferMass64
+#pragma kernel TransferStress64
+#pragma kernel UpdateGrid64
+#pragma kernel UpdateParticles64
+#pragma kernel CopyProbeParticles
+#pragma kernel TransferFused
+#pragma kernel TransferFused64
 
 #include "MlsMpmWhitewater.hlsl"
 
@@ -34,6 +42,8 @@ int3 _GridOffset;
 int _CellCount;
 RWStructuredBuffer<float4> _StaticGridBoundary;
 int _UseCachedGridBoundary;
+int _ReduceDiagnosticAtomics;
+groupshared uint diagnosticMaximum;
 float _Dt;
 float _RestDensity;
 float _BulkModulus;
@@ -69,6 +79,13 @@ void Fault(uint flag, uint particle)
     InterlockedMin(_Diagnostics[3], particle);
 }
 
+int _UncheckedAtomics;
+int _PackedAccumulation;
+int _GatherDensity;
+float _PackedMomentumScale;
+static const float PackedMassScale = 512.0;
+static const float UncheckedIncrementLimit = 16777216.0;
+
 void Accumulate(uint address, float value, float scale, uint particle)
 {
     float encoded = round(value * scale);
@@ -79,6 +96,14 @@ void Accumulate(uint address, float value, float scale, uint particle)
     }
 
     int increment = (int)encoded;
+    if (_UncheckedAtomics != 0)
+    {
+        // Without the returned value overflow cannot be observed per add; bounding each
+        // increment to 2^24 leaves 128 maximal contributions of headroom per node.
+        if (abs(encoded) > UncheckedIncrementLimit) { Fault(2, particle); return; }
+        InterlockedAdd(_Accumulation[address], increment);
+        return;
+    }
     int previous;
     InterlockedAdd(_Accumulation[address], increment, previous);
     if ((increment > 0 && previous > 2147483647 - increment) ||
@@ -114,8 +139,7 @@ float3 AffineVelocity(Particle p, float3 offset)
                   dot(p.affineZ.xyz, offset));
 }
 
-[numthreads(128, 1, 1)]
-void ClearGrid(uint id : SV_DispatchThreadID)
+void ClearGridCell(uint id)
 {
     if (id >= (uint)_CellCount) return;
     for (uint channel = 0; channel < 4; channel++)
@@ -123,8 +147,7 @@ void ClearGrid(uint id : SV_DispatchThreadID)
     _Grid[id] = 0;
 }
 
-[numthreads(128, 1, 1)]
-void TransferMass(uint id : SV_DispatchThreadID)
+void TransferMassParticle(uint id)
 {
     if (id >= (uint)_ParticleCount || _Diagnostics[0] != 0) return;
     Particle p = LoadParticle(id);
@@ -159,8 +182,102 @@ void TransferMass(uint id : SV_DispatchThreadID)
     }
 }
 
-[numthreads(128, 1, 1)]
-void TransferStress(uint id : SV_DispatchThreadID)
+// Two signed 16-bit fixed-point sums share one 32-bit atomic. Modular addition keeps
+// both halves exact as long as each final sum fits in int16; intermediates may wrap.
+int PackedHalf(float value, float scale, uint particle)
+{
+    float encoded = round(value * scale);
+    bool fits = abs(encoded) <= 32767.0;
+    if (!fits) Fault(2, particle);
+    return fits ? (int)encoded : 0;
+}
+
+void AccumulatePacked(uint address, int low, int high)
+{
+    InterlockedAdd(_Accumulation[address], asint(asuint(low) + (asuint(high) << 16)));
+}
+
+int2 UnpackHalves(int value)
+{
+    int low = (value << 16) >> 16;
+    return int2(low, (value - low) >> 16);
+}
+
+// Single-pass P2G: stress uses the density ratio gathered by the previous substep's
+// G2P (velocity.w), one substep older than the two-pass solver's density.
+void TransferFusedParticle(uint id)
+{
+    if (id >= (uint)_ParticleCount || _Diagnostics[0] != 0) return;
+    Particle p = LoadParticle(id);
+    if (!all(isfinite(p.position)) || !all(isfinite(p.velocity)) ||
+        !all(isfinite(p.affineX)) || !all(isfinite(p.affineY)) || !all(isfinite(p.affineZ)))
+    {
+        Fault(1, id);
+        return;
+    }
+    if (any(p.position.xyz < 2.0) || any(p.position.xyz > _Resolution - 3.0))
+    {
+        Fault(4, id);
+        return;
+    }
+    int3 origin;
+    float3 w[3];
+    Weights(p.position.xyz, origin, w);
+    float ratio = p.velocity.w > 0 ? p.velocity.w : 1.0;
+    float density = ratio * _RestDensity;
+    float compression = _PressureExponent == 3 ? ratio * ratio * ratio :
+        (_PressureExponent == 1 ? ratio : pow(ratio, _PressureExponent));
+    float pressure = _BulkModulus * max(compression - 1.0, 0.0);
+    float3x3 c = float3x3(p.affineX.xyz, p.affineY.xyz, p.affineZ.xyz);
+    float3x3 stress = _Viscosity * (c + transpose(c));
+    stress[0][0] -= pressure;
+    stress[1][1] -= pressure;
+    stress[2][2] -= pressure;
+    float3x3 q = c + (-4.0 * _Dt / density) * stress;
+
+    for (int z = 0; z < 3; z++)
+    for (int y = 0; y < 3; y++)
+    for (int x = 0; x < 3; x++)
+    {
+        int3 cell = origin + int3(x, y, z);
+        if (!ValidCell(cell)) { Fault(4, id); continue; }
+        float weight = w[x].x * w[y].y * w[z].z;
+        float3 momentum = weight * (p.velocity.xyz + mul(q, cell - p.position.xyz));
+        uint address = CellIndex(cell) * 4;
+        if (_PackedAccumulation != 0)
+        {
+            AccumulatePacked(address, (int)round(weight * PackedMassScale),
+                PackedHalf(momentum.x, _PackedMomentumScale, id));
+            AccumulatePacked(address + 1, PackedHalf(momentum.y, _PackedMomentumScale, id),
+                PackedHalf(momentum.z, _PackedMomentumScale, id));
+        }
+        else
+        {
+            Accumulate(address, weight, MassScale, id);
+            Accumulate(address + 1, momentum.x, MomentumScale, id);
+            Accumulate(address + 2, momentum.y, MomentumScale, id);
+            Accumulate(address + 3, momentum.z, MomentumScale, id);
+        }
+    }
+}
+
+// Every lane, including invalid/tail lanes, reaches both group barriers.
+void PublishDiagnosticMaximum(uint value, uint channel, uint lane)
+{
+    if (_ReduceDiagnosticAtomics == 0)
+    {
+        if (value > 0) InterlockedMax(_Diagnostics[channel], value);
+        return;
+    }
+    if (lane == 0) diagnosticMaximum = 0;
+    GroupMemoryBarrierWithGroupSync();
+    InterlockedMax(diagnosticMaximum, value);
+    GroupMemoryBarrierWithGroupSync();
+    if (lane == 0 && diagnosticMaximum > 0)
+        InterlockedMax(_Diagnostics[channel], diagnosticMaximum);
+}
+
+void TransferStressParticle(uint id, inout uint peak)
 {
     if (id >= (uint)_ParticleCount || _Diagnostics[0] != 0) return;
     Particle p = LoadParticle(id);
@@ -185,7 +302,7 @@ void TransferStress(uint id : SV_DispatchThreadID)
         Fault(8, id);
         return;
     }
-    InterlockedMax(_Diagnostics[1], (uint)round(ratio * 1024.0));
+    peak = (uint)round(ratio * 1024.0);
     _Particles[ParticleFieldIndex(id, 1)].w = ratio;
 
     float compression = _PressureExponent == 3 ? ratio * ratio * ratio :
@@ -214,6 +331,13 @@ void TransferStress(uint id : SV_DispatchThreadID)
     }
 }
 
+void TransferStressGroup(uint id, uint lane)
+{
+    uint peak = 0;
+    TransferStressParticle(id, peak);
+    PublishDiagnosticMaximum(peak, 1, lane);
+}
+
 float3 SphereBoundary(float3 position, float3 velocity)
 {
     float3 offset = position - _Sphere.xyz;
@@ -237,15 +361,29 @@ void CacheBottleBoundary(uint id : SV_DispatchThreadID)
     _StaticGridBoundary[id] = float4(normal, distance);
 }
 
-[numthreads(128, 1, 1)]
-void UpdateGrid(uint id : SV_DispatchThreadID)
+void UpdateGridCell(uint id)
 {
     if (id >= (uint)_CellCount || _Diagnostics[0] != 0) return;
     uint address = id * 4;
-    float mass = _Accumulation[address] / MassScale;
+    float mass = 0;
+    float3 momentum = 0;
+    if (_PackedAccumulation != 0)
+    {
+        int2 a = UnpackHalves(_Accumulation[address]);
+        int2 b = UnpackHalves(_Accumulation[address + 1]);
+        if (a.x < 0) { Fault(2, 0xffffffff); return; }
+        mass = a.x / PackedMassScale;
+        momentum = float3(a.y, b.x, b.y) / _PackedMomentumScale;
+    }
+    else
+    {
+        if (_UncheckedAtomics != 0 && _Accumulation[address] < 0) { Fault(2, 0xffffffff); return; }
+        mass = _Accumulation[address] / MassScale;
+        momentum = float3(_Accumulation[address + 1], _Accumulation[address + 2],
+                          _Accumulation[address + 3]) / MomentumScale;
+    }
     if (mass <= 0) return;
-    float3 velocity = float3(_Accumulation[address + 1], _Accumulation[address + 2],
-                            _Accumulation[address + 3]) / (MomentumScale * mass);
+    float3 velocity = momentum / mass;
     velocity += _Acceleration * _Dt;
     int3 cell = _GridOffset + int3(id % _GridSize.x, (id / _GridSize.x) % _GridSize.y,
                     id / (_GridSize.x * _GridSize.y));
@@ -267,8 +405,7 @@ void UpdateGrid(uint id : SV_DispatchThreadID)
     _Grid[id] = float4(velocity, mass);
 }
 
-[numthreads(128, 1, 1)]
-void UpdateParticles(uint id : SV_DispatchThreadID)
+void UpdateParticle(uint id, inout uint peak, inout uint densityPeak)
 {
     if (id >= (uint)_ParticleCount || _Diagnostics[0] != 0) return;
     Particle p = LoadParticle(id);
@@ -277,6 +414,7 @@ void UpdateParticles(uint id : SV_DispatchThreadID)
     Weights(p.position.xyz, origin, w);
     float3 velocity = 0;
     float3 cx = 0, cy = 0, cz = 0;
+    float density = 0;
 
     for (int z = 0; z < 3; z++)
     for (int y = 0; y < 3; y++)
@@ -285,7 +423,9 @@ void UpdateParticles(uint id : SV_DispatchThreadID)
         int3 cell = origin + int3(x, y, z);
         if (!ValidCell(cell)) { Fault(4, id); continue; }
         float weight = w[x].x * w[y].y * w[z].z;
-        float3 weighted = weight * _Grid[CellIndex(cell)].xyz;
+        float4 node = _Grid[CellIndex(cell)];
+        float3 weighted = weight * node.xyz;
+        density += weight * node.w;
         float3 offset = cell - p.position.xyz;
         velocity += weighted;
         cx += 4.0 * weighted.x * offset;
@@ -299,8 +439,16 @@ void UpdateParticles(uint id : SV_DispatchThreadID)
         Fault(1, id);
         return;
     }
+    if (_GatherDensity != 0)
+    {
+        // Same density the two-pass stress kernel computes for this substep, at x_n.
+        float ratio = density / _RestDensity;
+        if (!isfinite(ratio) || density <= 0 || ratio > 4.0) { Fault(8, id); return; }
+        densityPeak = (uint)round(ratio * 1024.0);
+        p.velocity.w = ratio;
+    }
     float speed = length(velocity);
-    InterlockedMax(_Diagnostics[2], (uint)round(min(speed, 100000.0) * 1024.0));
+    peak = (uint)round(min(speed, 100000.0) * 1024.0);
     if (speed * _Dt > 0.75) { Fault(16, id); return; }
 
     float3 position = p.position.xyz + _Dt * velocity;
@@ -342,6 +490,43 @@ void UpdateParticles(uint id : SV_DispatchThreadID)
     p.affineY = float4(contact ? 0 : cy, 0);
     p.affineZ = float4(contact ? 0 : cz, 0);
     StoreParticle(id, p);
+}
+
+void UpdateParticlesGroup(uint id, uint lane)
+{
+    uint peak = 0, densityPeak = 0;
+    UpdateParticle(id, peak, densityPeak);
+    PublishDiagnosticMaximum(peak, 2, lane);
+    if (_GatherDensity != 0) PublishDiagnosticMaximum(densityPeak, 1, lane);
+}
+
+// Identical solver kernels in two workgroup sizes; the runtime picks per GPU.
+[numthreads(128, 1, 1)] void ClearGrid(uint id : SV_DispatchThreadID) { ClearGridCell(id); }
+[numthreads(64, 1, 1)] void ClearGrid64(uint id : SV_DispatchThreadID) { ClearGridCell(id); }
+[numthreads(128, 1, 1)] void TransferMass(uint id : SV_DispatchThreadID) { TransferMassParticle(id); }
+[numthreads(64, 1, 1)] void TransferMass64(uint id : SV_DispatchThreadID) { TransferMassParticle(id); }
+[numthreads(128, 1, 1)]
+void TransferStress(uint id : SV_DispatchThreadID, uint lane : SV_GroupIndex) { TransferStressGroup(id, lane); }
+[numthreads(64, 1, 1)]
+void TransferStress64(uint id : SV_DispatchThreadID, uint lane : SV_GroupIndex) { TransferStressGroup(id, lane); }
+[numthreads(128, 1, 1)] void TransferFused(uint id : SV_DispatchThreadID) { TransferFusedParticle(id); }
+[numthreads(64, 1, 1)] void TransferFused64(uint id : SV_DispatchThreadID) { TransferFusedParticle(id); }
+[numthreads(128, 1, 1)] void UpdateGrid(uint id : SV_DispatchThreadID) { UpdateGridCell(id); }
+[numthreads(64, 1, 1)] void UpdateGrid64(uint id : SV_DispatchThreadID) { UpdateGridCell(id); }
+[numthreads(128, 1, 1)]
+void UpdateParticles(uint id : SV_DispatchThreadID, uint lane : SV_GroupIndex) { UpdateParticlesGroup(id, lane); }
+[numthreads(64, 1, 1)]
+void UpdateParticles64(uint id : SV_DispatchThreadID, uint lane : SV_GroupIndex) { UpdateParticlesGroup(id, lane); }
+
+// Calibration only: copies live particle streams into scratch probe storage.
+StructuredBuffer<float4> _ProbeSource;
+int _ProbeFloat4Count;
+
+[numthreads(128, 1, 1)]
+void CopyProbeParticles(uint id : SV_DispatchThreadID)
+{
+    if (id >= (uint)_ProbeFloat4Count) return;
+    _Particles[id] = _ProbeSource[id];
 }
 
 float WhitewaterMass(int3 cell)

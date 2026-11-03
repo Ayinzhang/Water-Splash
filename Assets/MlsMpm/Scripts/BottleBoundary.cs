@@ -16,6 +16,8 @@ namespace WaterSplash
         public bool mouthFacesLeft;
         [Tooltip("Omit empty grid slabs without changing cell size or world coordinates. Reset after changing.")]
         public bool compactGrid = true;
+        [Tooltip("Use an 80 x 30 x 30 storage window when the original lattice and wall clearance support it. Reset after changing.")]
+        public bool tightGrid;
         public float AxisSign => mouthFacesLeft ? -1 : 1;
         public float ParticleSpacing { get; private set; }
         public float WaterVolume { get; private set; }
@@ -51,12 +53,37 @@ namespace WaterSplash
             if (fluid == null) throw new InvalidOperationException("Assign the bottle fluid before configuring its grid.");
             fluid.gridWindow = null;
             if (!compactGrid) return;
-            // Keep the exact original lattice and full X extent. Only empty Y/Z slabs
-            // are omitted, with room for transfer support and whitewater gradient probes.
+            // Both windows retain the original lattice and the entire bottle, including spray space.
             float radius = 0;
             foreach (Vector2 section in Profile) radius = Mathf.Max(radius, section.y);
-            Vector3 minimum = (center - new Vector3(0, radius, radius) - fluid.GridOrigin) / fluid.CellSize;
-            Vector3 maximum = (center + new Vector3(0, radius, radius) - fluid.GridOrigin) / fluid.CellSize;
+            if (tightGrid)
+            {
+                // All potentially nonzero grid nodes must fit. Exterior whitewater reads remain
+                // implicit zero, exactly as in the larger grid; particle support is never clipped.
+                Vector3 gridCenter = (center - fluid.GridOrigin) / fluid.CellSize;
+                var lowerBound = new Vector3Int(0, Mathf.CeilToInt(gridCenter.y - 15),
+                    Mathf.CeilToInt(gridCenter.z - 15));
+                var window = new BoundsInt(lowerBound, new Vector3Int(fluid.gridResolution, 30, 30));
+                float spacing = FindFillSpacing(32768) * Mathf.Pow(32768f / fluid.particleCount, 1f / 3);
+                float innerRadius = (radius - .75f * spacing) / fluid.CellSize;
+                Vector3 minimumParticle = gridCenter - new Vector3(0, innerRadius, innerRadius);
+                Vector3 maximumParticle = gridCenter + new Vector3(0, innerRadius, innerRadius);
+                Vector3Int firstNode = Vector3Int.FloorToInt(minimumParticle - Vector3.one * .5f);
+                Vector3Int lastNode = Vector3Int.FloorToInt(maximumParticle - Vector3.one * .5f) +
+                    Vector3Int.one * 2;
+                firstNode.x = lastNode.x = fluid.gridResolution / 2;
+                if (window.yMin < 0 || window.zMin < 0 || window.yMax > fluid.gridResolution ||
+                    window.zMax > fluid.gridResolution || !window.Contains(firstNode) || !window.Contains(lastNode))
+                    throw new InvalidOperationException("The 30 x 30 bottle cross-section cannot contain all " +
+                        "particle transfer nodes at this lattice/particle spacing. Disable tightGrid; do not truncate support.");
+                fluid.gridWindow = window;
+                return;
+            }
+            float first = Profile[0].x * AxisSign, last = Profile[Profile.Length - 1].x * AxisSign;
+            Vector3 minimum = (center + new Vector3(Mathf.Min(first, last), -radius, -radius) -
+                fluid.GridOrigin) / fluid.CellSize;
+            Vector3 maximum = (center + new Vector3(Mathf.Max(first, last), radius, radius) -
+                fluid.GridOrigin) / fluid.CellSize;
             Vector3Int lower = Vector3Int.Max(Vector3Int.zero, Vector3Int.FloorToInt(minimum) - Vector3Int.one * 4);
             Vector3Int upper = Vector3Int.Min(Vector3Int.one * fluid.gridResolution,
                 Vector3Int.CeilToInt(maximum) + Vector3Int.one * 5);

@@ -42,7 +42,7 @@ hull collider is also constrained inside the curved wall.
 - Initial spacing: approximately 0.03533 (previous upright scene: 0.07407).
 - Represented water volume: approximately 1.445 world units cubed, 10.85% of the old
   upright fill. The particles are resampled inside the curved volume, not scaled visuals.
-- Grid: 80 x 40 x 40 stored cells with the original 0.05333 cell width and
+- Grid: 80 x 30 x 30 stored cells with the original 0.05333 cell width and
   unchanged world-space lattice (80-cubed reference domain). Empty Y/Z slabs are
   omitted; the entire bottle, including spray space, remains covered.
 - Six substeps per 1/60-second physics tick for 16K/32K/64K; a configured 128K
@@ -189,3 +189,101 @@ RGB readbacks were identical. GPU-fenced whole-scene render-request medians were
 1.034--1.075 ms full-frame versus 1.018--1.022 ms cropped; these include CPU
 submission, exclude simulation and are not GPU timestamp timings. The primary
 verified result is fewer rasterized water pixels without a visual change.
+
+## Phone diagnostic-reduction / 80 x 30 x 30 variant
+
+The bottle now enables `reduceDiagnosticAtomics` and `BottleBoundary.tightGrid`.
+Density and speed maxima are first accumulated in group-shared memory, then
+published with at most one global maximum per 128-thread group. Tail lanes and
+faulting lanes still reach both synchronization barriers. All non-finite,
+support, density, displacement and fixed-point overflow checks remain enabled;
+diagnostic maxima retain their original integer encoding. MLS transfer stages
+remain separate, without sorting, fusion or time scaling.
+
+The tight grid has 72,000 stored nodes, versus 128,000 for 80 x 40 x 40:
+43.75% fewer nodes. Accumulation/velocity/wall-cache storage together decreases
+from 5.859375 MiB to 3.295898 MiB. Grid origin, cell width, particle positions
+and represented water volume are unchanged.
+
+A 30-cell cross-section fits the nonzero transfer nodes for the existing
+16K/32K/64K/128K bottle presets because particles are projected inside the wall
+by their existing spacing-dependent clearance. The complete bottle, including
+spray space above the initial fill, is accounted for. Whitewater reads outside
+the storage window return zero, as those nodes also have zero mass in the
+larger grid. Invalid particle transfer support still raises a GPU fault.
+Configurations that cannot fit all transfer nodes (for example 256K at the
+current lattice) explicitly reject this tight mode instead of truncating water
+or silently changing resolution. Disable `tightGrid` to retain the previous
+80 x 40 x 40 comparison window.
+
+Bottle resets fix grouped diagnostic reduction and the tight grid on (the
+previous phone A configuration). Development builds display this configuration
+instead of optimization toggles, and each reset logs the active settings.
+Particle presets, rendering modes, fixed ticks and substep tiers are unchanged.
+
+The subsequent local-integer P2G and compact-RT experiment was reverted after
+the user reported below-20-FPS phone performance, including with its toggles
+disabled. The original P2G kernels, transfer arithmetic and full-sized
+scissored water targets are restored, not merely selected via feature flags.
+The earlier A capture averaged 15.06 ms/frame (66.4 FPS) at 64K/6; this is a
+historical measurement, not a new post-rollback phone result.
+
+## Per-kernel timing and workgroup autotune
+
+Every MLS stage is compiled at 128 threads (original names) and 64 threads
+(`*64`). `MlsMpmFluid.groupSizeMode` is `Fixed128` (default), `Fixed64` or
+`Auto`; the bottle uses `Auto`. Both sizes produce bit-identical states, peaks
+and counters (edit-mode tests).
+
+In `Auto` player builds the first launch per GPU name, driver, build and preset
+freezes the water for a few seconds. A scratch copy of the particles runs one
+baseline tick plus extra repetitions of one stage/size per block; the per-stage
+cost is the `FrameTimingManager` GPU-frame delta divided by the repetition
+count (CPU frame interval only if GPU timing is unavailable). 64 is chosen only
+when it is at least 3% faster, faults keep 128, and the result is cached in
+`PlayerPrefs`. The editor stays at 128. Frame Timing Stats is enabled in the
+player settings. Development builds have "Measure GPU kernels" for a 3-round
+re-measurement; each run logs a `MLS-MPM group calibration:` line.
+
+Adreno 840 (Vulkan, 64K, 80 x 30 x 30, 6 substeps), ms per substep:
+Clear 0.04, P2G mass 0.80, P2G stress 0.64, Grid 0.02, G2P 0.11 (1.60 total,
+about 9.6 ms per tick). 64 and 128 differed by under 1%, so all stages stayed
+at 128.
+
+## P2G variants and spatial sort
+
+`MlsMpmFluid.p2gMode` (runtime-switchable; component default `TwoPass`, the
+bottle scene uses `FusedPacked16`):
+
+- `TwoPass`: reference two-pass P2G with returning, overflow-checked atomics.
+- `TwoPassUnchecked`: same sums with non-returning atomics; per-increment bound
+  plus a negative-mass check in the grid pass. Bit-identical to `TwoPass`.
+- `Fused`: one P2G pass (mass + momentum + stress, 108 atomics instead of 189,
+  no density gather). Stress uses the density ratio that the previous G2P
+  gathered from grid mass (`velocity.w`), one substep older.
+- `FusedPacked16`: `Fused` with (mass, mx) and (my, mz) as two signed 16-bit
+  fixed-point sums per 32-bit atomic (54 atomics). Mass scale 512 (ratio up to
+  about 9; faults stop at 4), momentum scale 32 (per-node |sum m v| up to 1024,
+  about 148 cells/s at rest density). Intermediate wrap is harmless, but a
+  final overflow is not detectable; the CFL speed fault usually trips first.
+
+`mlsSortInterval` reorders particles into 4^3-cell blocks every N ticks.
+Integer atomics are order-independent, so sorting gives exactly the same
+water (permuted particle order).
+
+Development builds have "Bench P2G", which logs `MLS-MPM P2G benchmark:` with
+the ms per substep for every mode, both unsorted and directly after a sort.
+Adreno 840, 64K, 80 x 30 x 30, 6 substeps:
+
+| Mode | ms/substep | sorted | ms/tick |
+| --- | --- | --- | --- |
+| TwoPass | 2.10 | 2.16 | 12.6 |
+| Unchecked | 2.08 | 2.14 | 12.5 |
+| Fused | 1.22 | 1.28 | 7.3 |
+| Packed16 | 0.73 | 0.76 | 4.4 |
+
+One sort costs 0.58 ms and makes P2G slightly slower on this GPU, so sorting
+stays off. Over 240 moving-hull ticks at 64K, `Fused`/`FusedPacked16` show
+no faults, a peak density ratio 1.54 vs 1.44, and mean speed within 2%
+(edit-mode tests). Eight-bit sums are not viable: per-node momentum would
+saturate at about 4 cells/s.

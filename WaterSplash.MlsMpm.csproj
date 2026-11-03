@@ -65,6 +65,7 @@
     <Compile Include="Assets\MlsMpm\Scripts\MlsMpmMobileValidation.cs" />
     <Compile Include="Assets\MlsMpm\Scripts\MlsMpmSurfaceFeature.cs" />
     <Compile Include="Assets\MlsMpm\Scripts\BottleBoundary.cs" />
+    <Compile Include="Assets\MlsMpm\Scripts\MlsMpmFluid.Calibration.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="Assets\MlsMpm\Shaders\BottleGlass.shader" />

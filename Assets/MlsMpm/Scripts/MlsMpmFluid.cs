@@ -7,10 +7,15 @@ using UnityEngine.Profiling;
 
 namespace WaterSplash
 {
-    public sealed class MlsMpmFluid : MonoBehaviour
+    public sealed partial class MlsMpmFluid : MonoBehaviour
     {
         public enum SurfaceQuality { Low, Medium, High }
         public enum SolverMethod { MlsMpm, PositionBasedMpm }
+        public enum GroupSizeMode { Fixed128, Auto, Fixed64 }
+        // TwoPass: exact reference. Unchecked: same sums, non-returning atomics.
+        // Fused: one P2G pass using the density ratio gathered by the previous G2P.
+        // FusedPacked16: Fused with two 16-bit fixed-point sums per 32-bit atomic.
+        public enum P2gMode { TwoPass, TwoPassUnchecked, Fused, FusedPacked16 }
 
         static readonly List<MlsMpmFluid> instances = new List<MlsMpmFluid>();
         internal static IReadOnlyList<MlsMpmFluid> ActiveInstances => instances;
@@ -94,7 +99,15 @@ namespace WaterSplash
         public bool useParticleSoA;
         [Tooltip("Bottle solver only: cache exact static grid-wall distances and normals. Reset after changing.")]
         public bool cacheGridBoundary;
-        [Tooltip("PB-MPM only: reorder particles by 4^3 grid blocks every N ticks. MLS uses the original unsorted two-pass solver.")]
+        [Tooltip("Bottle MLS only: reduce density/speed maxima within each group before one global atomic. Fault checks remain enabled.")]
+        public bool reduceDiagnosticAtomics;
+        [Tooltip("Bottle MLS only: 64- or 128-thread solver kernels. Auto measures each kernel once per GPU, driver and preset on device, then caches the choice.")]
+        public GroupSizeMode groupSizeMode;
+        [Tooltip("Bottle MLS only: particle-to-grid transfer variant. Can be switched at runtime.")]
+        public P2gMode p2gMode;
+        [Tooltip("Bottle MLS only: reorder particles by 4^3 grid blocks every N ticks (0 = never) to localize P2G atomics.")]
+        [Range(0, 16)] public int mlsSortInterval;
+        [Tooltip("PB-MPM only: reorder particles by 4^3 grid blocks every N ticks.")]
         [Range(0, 16)] public int spatialSortInterval = 1;
         public SolverMethod solverMethod;
         [Range(1, 16)] public int positionIterations = 2;
@@ -175,6 +188,14 @@ namespace WaterSplash
         CommandBuffer commands;
         MaterialPropertyBlock drawProperties;
         readonly int[] kernels = new int[5];
+        readonly int[] kernels64 = new int[5];
+        readonly int[] groupSizes = { 128, 128, 128, 128, 128 };
+        bool supportsGroupVariants;
+        readonly int[] fusedKernels = { -1, -1 };
+        bool supportsP2gVariants;
+        const float PackedMomentumScale = 32;
+        public P2gMode ActiveP2gMode => supportsP2gVariants ? p2gMode : P2gMode.TwoPass;
+        static readonly CustomSampler mlsSortSampler = CustomSampler.Create("MLS-MPM GPU/Spatial sort", true);
         readonly int[] positionKernels = new int[7];
         SolverMethod activeSolverMethod;
         static readonly CustomSampler positionSampler = CustomSampler.Create("PB-MPM GPU/Displacement solve", true);
@@ -272,11 +293,8 @@ namespace WaterSplash
             solver.name = "MLS-MPM runtime solver";
             Vector3Int dimensions = activeGridWindow.size;
             int cells = activeCellCount = checked(dimensions.x * dimensions.y * dimensions.z);
-            solver.SetInts("_GridSize", dimensions.x, dimensions.y, dimensions.z);
-            Vector3Int offset = activeGridWindow.position;
-            solver.SetInts("_GridOffset", offset.x, offset.y, offset.z);
             particles = new ComputeBuffer(particleCount * 5, sizeof(float) * 4);
-            solver.SetInt("_ParticlePlaneStride", ParticlePlaneStride);
+            SetSolverConstants(solver);
             accumulation = new ComputeBuffer(cells * 4, sizeof(int));
             grid = new ComputeBuffer(cells, sizeof(float) * 4);
             diagnostics = new ComputeBuffer(8, sizeof(uint));
@@ -305,13 +323,20 @@ namespace WaterSplash
             UploadParticles(initial);
 
             string[] names = { "ClearGrid", "TransferMass", "TransferStress", "UpdateGrid", "UpdateParticles" };
+            supportsGroupVariants = solverMethod == SolverMethod.MlsMpm;
             for (int i = 0; i < kernels.Length; i++)
             {
                 kernels[i] = solver.FindKernel(names[i]);
-                if (i != 4) solver.SetBuffer(kernels[i], "_Accumulation", accumulation);
-                if (i != 0) solver.SetBuffer(kernels[i], "_Diagnostics", diagnostics);
-                if (i == 0 || i == 3 || i == 4) solver.SetBuffer(kernels[i], "_Grid", grid);
-                if (i == 1 || i == 2 || i == 4) solver.SetBuffer(kernels[i], "_Particles", particles);
+                supportsGroupVariants &= solver.HasKernel(names[i] + "64");
+            }
+            for (int i = 0; i < groupSizes.Length; i++) groupSizes[i] = 128;
+            if (supportsGroupVariants)
+                for (int i = 0; i < kernels64.Length; i++) kernels64[i] = solver.FindKernel(names[i] + "64");
+            supportsP2gVariants = supportsGroupVariants && solver.HasKernel("TransferFused") && solver.HasKernel("TransferFused64");
+            if (supportsP2gVariants)
+            {
+                fusedKernels[0] = solver.FindKernel("TransferFused");
+                fusedKernels[1] = solver.FindKernel("TransferFused64");
             }
             cacheGridKernel = solver.HasKernel("CacheBottleBoundary") ? solver.FindKernel("CacheBottleBoundary") : -1;
             gridBoundaryReady = false;
@@ -319,9 +344,8 @@ namespace WaterSplash
             {
                 staticGridBoundary = new ComputeBuffer(activeCacheGridBoundary ? cells : 1, sizeof(float) * 4);
                 solver.SetBuffer(cacheGridKernel, "_StaticGridBoundary", staticGridBoundary);
-                solver.SetBuffer(kernels[3], "_StaticGridBoundary", staticGridBoundary);
-                solver.SetInt("_UseCachedGridBoundary", activeCacheGridBoundary ? 1 : 0);
             }
+            BindMlsKernels(solver, particles, accumulation, grid, diagnostics);
             string[] positionNames = { "PbPrepare", "PbProject", "PbScatter", "PbGrid", "PbGather", "PbIntegrate", "PbExportGrid" };
             for (int i = 0; i < positionKernels.Length; i++)
             {
@@ -331,7 +355,7 @@ namespace WaterSplash
                 if (i == 2 || i == 3) solver.SetBuffer(kernel, "_Accumulation", accumulation);
                 if (i == 3 || i == 4 || i == 6) solver.SetBuffer(kernel, "_Grid", grid);
             }
-            if (solverMethod == SolverMethod.PositionBasedMpm)
+            if (solverMethod == SolverMethod.PositionBasedMpm || supportsP2gVariants)
             {
                 sortBlocks = (gridResolution + 3) / 4;
                 sortKeys = new ComputeBuffer(particleCount, sizeof(uint));
@@ -401,6 +425,7 @@ namespace WaterSplash
             readbackPending = false;
             paused = false;
             ClearInitialGrid(cells);
+            ConfigureGroupSizes();
             if (!SystemInfo.supportsAsyncGPUReadback)
                 Debug.LogWarning("MLS-MPM: async GPU readback is unavailable; diagnostics will synchronize once per second.", this);
         }
@@ -469,6 +494,94 @@ namespace WaterSplash
             solver.Dispatch(kernels[0], (cells + 127) / 128, 1, 1);
         }
 
+        void SetSolverConstants(ComputeShader target)
+        {
+            Vector3Int dimensions = activeGridWindow.size;
+            Vector3Int offset = activeGridWindow.position;
+            target.SetInts("_GridSize", dimensions.x, dimensions.y, dimensions.z);
+            target.SetInts("_GridOffset", offset.x, offset.y, offset.z);
+            target.SetInt("_ParticlePlaneStride", ParticlePlaneStride);
+            target.SetInt("_UseCachedGridBoundary",
+                activeCacheGridBoundary && target.HasKernel("CacheBottleBoundary") ? 1 : 0);
+        }
+
+        void BindMlsKernels(ComputeShader target, ComputeBuffer particleBuffer, ComputeBuffer accumulationBuffer,
+            ComputeBuffer gridBuffer, ComputeBuffer diagnosticBuffer)
+        {
+            for (int variant = 0; variant < (supportsGroupVariants ? 2 : 1); variant++)
+            for (int i = 0; i < kernels.Length; i++)
+            {
+                int kernel = variant == 0 ? kernels[i] : kernels64[i];
+                if (i != 4) target.SetBuffer(kernel, "_Accumulation", accumulationBuffer);
+                if (i != 0) target.SetBuffer(kernel, "_Diagnostics", diagnosticBuffer);
+                if (i == 0 || i == 3 || i == 4) target.SetBuffer(kernel, "_Grid", gridBuffer);
+                if (i == 1 || i == 2 || i == 4) target.SetBuffer(kernel, "_Particles", particleBuffer);
+                if (i == 3 && staticGridBoundary != null) target.SetBuffer(kernel, "_StaticGridBoundary", staticGridBoundary);
+            }
+            if (!supportsP2gVariants) return;
+            foreach (int kernel in fusedKernels)
+            {
+                target.SetBuffer(kernel, "_Accumulation", accumulationBuffer);
+                target.SetBuffer(kernel, "_Diagnostics", diagnosticBuffer);
+                target.SetBuffer(kernel, "_Particles", particleBuffer);
+            }
+        }
+
+        void SetP2gParameters(CommandBuffer cb, ComputeShader target, P2gMode mode)
+        {
+            cb.SetComputeIntParam(target, "_UncheckedAtomics", mode == P2gMode.TwoPass ? 0 : 1);
+            cb.SetComputeIntParam(target, "_PackedAccumulation", mode == P2gMode.FusedPacked16 ? 1 : 0);
+            cb.SetComputeIntParam(target, "_GatherDensity", mode >= P2gMode.Fused ? 1 : 0);
+            cb.SetComputeFloatParam(target, "_PackedMomentumScale", PackedMomentumScale);
+        }
+
+        // One MLS substep; fused modes replace the mass and stress passes with a single pass.
+        void EncodeMlsSubstep(CommandBuffer cb, ComputeShader target, P2gMode mode, bool sample)
+        {
+            bool fused = mode >= P2gMode.Fused;
+            for (int stage = 0; stage < kernels.Length; stage++)
+            {
+                if (fused && stage == 2) continue;
+                int size = groupSizes[stage];
+                int kernel = fused && stage == 1 ? fusedKernels[size == 64 ? 1 : 0] : StageKernel(stage, size);
+                if (sample) cb.BeginSample(gpuStages[stage]);
+                cb.DispatchCompute(target, kernel, StageGroups(stage, size), 1, 1);
+                if (sample) cb.EndSample(gpuStages[stage]);
+            }
+        }
+
+        void EncodeSpatialSort(CommandBuffer cb, ComputeShader target)
+        {
+            int particleGroups = (activeCount + 127) / 128;
+            cb.DispatchCompute(target, sortKernels[0], (sortBlocks * sortBlocks * sortBlocks + 127) / 128, 1, 1);
+            cb.DispatchCompute(target, sortKernels[1], particleGroups, 1, 1);
+            cb.DispatchCompute(target, sortKernels[2], 1, 1, 1);
+            cb.DispatchCompute(target, sortKernels[3], particleGroups, 1, 1);
+            cb.DispatchCompute(target, sortKernels[4], particleGroups, 1, 1);
+        }
+
+        int StageKernel(int stage, int size) => size == 64 ? kernels64[stage] : kernels[stage];
+
+        int StageGroups(int stage, int size) =>
+            ((stage == 0 || stage == 3 ? activeCellCount : activeCount) + size - 1) / size;
+
+        void SetStepParameters(CommandBuffer cb, ComputeShader target, float dt)
+        {
+            float h = CellSize;
+            float soundInCells = soundSpeed / h;
+            cb.SetComputeIntParam(target, "_ParticleCount", activeCount);
+            cb.SetComputeIntParam(target, "_Resolution", activeResolution);
+            cb.SetComputeIntParam(target, "_CellCount", activeCellCount);
+            cb.SetComputeIntParam(target, "_ReduceDiagnosticAtomics", reduceDiagnosticAtomics ? 1 : 0);
+            cb.SetComputeFloatParam(target, "_Dt", dt);
+            cb.SetComputeFloatParam(target, "_RestDensity", RestDensity);
+            cb.SetComputeFloatParam(target, "_BulkModulus", RestDensity * soundInCells * soundInCells / pressureExponent);
+            cb.SetComputeFloatParam(target, "_PressureExponent", pressureExponent);
+            cb.SetComputeFloatParam(target, "_Viscosity", viscosity);
+            cb.SetComputeFloatParam(target, "_AffineRetention", Mathf.Exp(-affineDamping * dt));
+            cb.SetComputeFloatParam(target, "_DivergenceRetention", Mathf.Exp(-divergenceDamping * dt));
+        }
+
         void Update()
         {
             float delta = Time.unscaledDeltaTime;
@@ -487,6 +600,7 @@ namespace WaterSplash
                 Fail(error);
                 return;
             }
+            if (calibration != null) { UpdateCalibration(); PollDiagnostics(); return; }
             if (externalControl) { PollDiagnostics(); return; }
             if (Input.GetKeyDown(KeyCode.Space)) paused = !paused;
             UpdateInteraction();
@@ -524,17 +638,8 @@ namespace WaterSplash
             configureSimulation?.Invoke(commands, solver);
             float dt = (float)(FixedTick / substeps);
             float h = CellSize;
-            float soundInCells = soundSpeed / h;
-            commands.SetComputeIntParam(solver, "_ParticleCount", activeCount);
-            commands.SetComputeIntParam(solver, "_Resolution", activeResolution);
-            commands.SetComputeIntParam(solver, "_CellCount", activeCellCount);
-            commands.SetComputeFloatParam(solver, "_Dt", dt);
-            commands.SetComputeFloatParam(solver, "_RestDensity", RestDensity);
-            commands.SetComputeFloatParam(solver, "_BulkModulus", RestDensity * soundInCells * soundInCells / pressureExponent);
-            commands.SetComputeFloatParam(solver, "_PressureExponent", pressureExponent);
-            commands.SetComputeFloatParam(solver, "_Viscosity", viscosity);
-            commands.SetComputeFloatParam(solver, "_AffineRetention", Mathf.Exp(-affineDamping * dt));
-            commands.SetComputeFloatParam(solver, "_DivergenceRetention", Mathf.Exp(-divergenceDamping * dt));
+            SetStepParameters(commands, solver, dt);
+            SetP2gParameters(commands, solver, ActiveP2gMode);
             commands.SetComputeFloatParam(solver, "_PbRelaxation", positionRelaxation);
             commands.SetComputeFloatParam(solver, "_PbViscosity", positionViscosity);
             commands.SetComputeFloatParam(solver, "_PbVolumeBlend", gridVolumeBlend);
@@ -563,16 +668,14 @@ namespace WaterSplash
                 Vector3 acceleration = gravity;
                 if (SimulatedSeconds < kickUntil) acceleration += new Vector3(12, 3, 0);
                 commands.SetComputeVectorParam(solver, "_Acceleration", acceleration / h);
-                if (solverMethod == SolverMethod.PositionBasedMpm && spatialSortInterval > 0 && whitewaterStep % spatialSortInterval == 0)
+                int sortInterval = solverMethod == SolverMethod.PositionBasedMpm ? spatialSortInterval :
+                    supportsP2gVariants ? mlsSortInterval : 0;
+                if (sortInterval > 0 && whitewaterStep % sortInterval == 0)
                 {
-                    commands.BeginSample(sortSampler);
-                    int binGroups = (sortBlocks * sortBlocks * sortBlocks + 127) / 128;
-                    commands.DispatchCompute(solver, sortKernels[0], binGroups, 1, 1);
-                    commands.DispatchCompute(solver, sortKernels[1], particleGroups, 1, 1);
-                    commands.DispatchCompute(solver, sortKernels[2], 1, 1, 1);
-                    commands.DispatchCompute(solver, sortKernels[3], particleGroups, 1, 1);
-                    commands.DispatchCompute(solver, sortKernels[4], particleGroups, 1, 1);
-                    commands.EndSample(sortSampler);
+                    CustomSampler sampler = solverMethod == SolverMethod.PositionBasedMpm ? sortSampler : mlsSortSampler;
+                    commands.BeginSample(sampler);
+                    EncodeSpatialSort(commands, solver);
+                    commands.EndSample(sampler);
                 }
                 for (int step = 0; step < substeps; step++)
                 {
@@ -598,13 +701,7 @@ namespace WaterSplash
                             commands.DispatchCompute(solver, positionKernels[6], cellGroups, 1, 1);
                         commands.EndSample(positionSampler);
                     }
-                    else for (int stage = 0; stage < kernels.Length; stage++)
-                    {
-                        commands.BeginSample(gpuStages[stage]);
-                        commands.DispatchCompute(solver, kernels[stage],
-                            stage == 0 || stage == 3 ? cellGroups : particleGroups, 1, 1);
-                        commands.EndSample(gpuStages[stage]);
-                    }
+                    else EncodeMlsSubstep(commands, solver, ActiveP2gMode, true);
                 }
                 if (enableWhitewater)
                 {
@@ -1023,6 +1120,7 @@ namespace WaterSplash
 
         public void Release()
         {
+            ReleaseCalibration();
             generation++;
             readbackPending = false;
             particles?.Release();

@@ -74,6 +74,10 @@ namespace WaterSplash.Editor
             fluid.solverMethod = MlsMpmFluid.SolverMethod.MlsMpm;
             fluid.useParticleSoA = true;
             fluid.cacheGridBoundary = true;
+            fluid.reduceDiagnosticAtomics = true;
+            fluid.groupSizeMode = MlsMpmFluid.GroupSizeMode.Auto;
+            fluid.p2gMode = MlsMpmFluid.P2gMode.FusedPacked16;
+            boundary.tightGrid = true;
             fluid.surfaceQuality = MlsMpmFluid.SurfaceQuality.High;
             fluid.sphereRadius = .12f;
             fluid.sphereObstacle.position = new Vector3(.20f*boundary.AxisSign,.49f,0);
