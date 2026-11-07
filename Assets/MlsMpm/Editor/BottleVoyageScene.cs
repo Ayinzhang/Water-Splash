@@ -170,7 +170,7 @@ namespace WaterSplash.Editor
             var feature = ScriptableObject.CreateInstance<MlsMpmSurfaceFeature>();
             feature.name = "Turquoise water";
             feature.detailedWhitewater = true;
-            feature.cropToFluidBounds = true;
+            feature.cropToFluidBounds = false;
             feature.particleShader = RequiredShader("Hidden/WaterSplash/Surface Particles");
             feature.surfaceShader = RequiredShader("Hidden/WaterSplash/Continuous Surface");
             feature.waterColor = new Color(.018f, .29f, .30f);

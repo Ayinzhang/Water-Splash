@@ -14,13 +14,20 @@ namespace WaterSplash
         public UniversalRenderPipelineAsset pipeline;
         public ComputeShader waterProbe;
         public BottleBoundary boundary;
+        public TagRope tagRope;
+        [Tooltip("Baked surroundings reflected by the glass, water and tabletop.")]
+        public Cubemap reflection;
+        [Tooltip("Outer bottle radius along its axis, used for the analytic tabletop shadow.")]
+        public Texture2D bottleProfile;
         public bool showCaption = true;
+        public Color captionColor = new Color(.26f,.22f,.25f);
         public int CompletedReadbacks { get; private set; }
         public string Error { get; private set; }
         public float WaterHeight { get; private set; }
         public double BacklogSeconds => backlog;
         public bool IsDraggingBoat => dragging;
         public bool ResetPending => resetRequested;
+        public int RequestedParticleCount => requestedParticleCount;
 
         readonly Vector4[] probePositions = new Vector4[5];
         readonly Vector4[] samples = new Vector4[5];
@@ -36,9 +43,14 @@ namespace WaterSplash
         int collectKernel, reduceKernel, blocks, generation, requestedParticleCount;
         bool pending, suspended, ready, dragging, skipDelta, resetRequested;
         GUIStyle titleStyle, subtitleStyle, footStyle;
+        double resetCompletedAt;
+        bool waitingForResetReady;
+        float particleSlider;
+        bool sliderDragging;
 
         void Awake()
         {
+            PublishLook();
             previousPipeline = QualitySettings.renderPipeline;
             if (fluid == null || fluid.sphereObstacle == null || boat == null ||
                 waterCamera == null || pipeline == null || waterProbe == null || boundary == null)
@@ -65,6 +77,19 @@ namespace WaterSplash
             probe.SetBuffer(reduceKernel, "_Samples", results);
             probe.SetFloat("_Radius", .23f);
             requestedParticleCount = fluid.particleCount;
+#if UNITY_ANDROID && !UNITY_EDITOR
+            using (var player = new AndroidJavaClass("com.unity3d.player.UnityPlayer"))
+            using (var activity = player.GetStatic<AndroidJavaObject>("currentActivity"))
+            using (var intent = activity.Call<AndroidJavaObject>("getIntent"))
+            {
+                int count = intent.Call<int>("getIntExtra", "voyageParticles", requestedParticleCount);
+                if (count == 16384 || count == 32768 || count == 65536 || count == 131072)
+                    requestedParticleCount = count;
+                if (Debug.isDebugBuild)
+                    fluid.optimizeTransfers = intent.Call<int>("getIntExtra", "voyageOptimized", fluid.optimizeTransfers ? 1 : 0) != 0;
+            }
+#endif
+            particleSlider = SliderForParticleCount(requestedParticleCount);
             ready = true;
         }
 
@@ -73,27 +98,41 @@ namespace WaterSplash
             if (ready) ResetWater();
         }
 
+        void OnValidate() => PublishLook();
+
+        void PublishLook()
+        {
+            Shader.SetGlobalTexture("_VoyageReflection", reflection != null ? (Texture)reflection : Texture2D.blackTexture);
+            Shader.SetGlobalFloat("_VoyageReflectionStrength", reflection != null ? 1 : 0);
+            if (bottleProfile != null) Shader.SetGlobalTexture("_VoyageBottleProfile", bottleProfile);
+            if (boundary != null) Shader.SetGlobalVector("_VoyageBottle", (Vector4)boundary.center + new Vector4(0, 0, 0, boundary.AxisSign));
+        }
+
         public void ResetWater()
         {
             if (!ready) throw new InvalidOperationException(Error ?? "Bottle is not ready.");
             // Do not release/rebind probe buffers while their previous generation
             // still has a readback in flight. UI requests coalesce until it finishes.
             if (pending) { resetRequested = true; dragging = false; return; }
+            var resetTimer = System.Diagnostics.Stopwatch.StartNew();
             resetRequested = false;
             generation++;
             fluid.particleCount = requestedParticleCount;
             fluid.substeps = SubstepsForParticleCount(requestedParticleCount);
             fluid.reduceDiagnosticAtomics = true;
-            fluid.groupSizeMode = MlsMpmFluid.GroupSizeMode.Auto;
+            fluid.groupSizeMode = MlsMpmFluid.GroupSizeMode.Fixed128;
             boundary.tightGrid = true;
             boat.SetPositionAndRotation(initialBoatPosition, heading);
             desiredPosition = boatTarget = initialBoatPosition;
             desiredNormal = Vector3.up;
             fluid.sphereObstacle.position = HullCenter();
             boundary.ConfigureGridWindow();
+            double gridMs = resetTimer.Elapsed.TotalMilliseconds;
             fluid.Initialize();
             if (fluid.Error != null) { Fail(fluid.Error); return; }
+            double initializeMs = resetTimer.Elapsed.TotalMilliseconds - gridMs;
             Vector3[] positions = boundary.CreateInitialFill(fluid.particleCount, out float spacing);
+            double fillMs = resetTimer.Elapsed.TotalMilliseconds - gridMs - initializeMs;
             fluid.SetComparisonInitialPositions(positions, spacing);
             fluid.particleRadiusScale = spacing * .34f / fluid.CellSize;
             if (Debug.isDebugBuild)
@@ -118,15 +157,22 @@ namespace WaterSplash
             backlog = 0;
             dragging = false;
             skipDelta = true;
+            resetCompletedAt = Time.realtimeSinceStartupAsDouble;
+            waitingForResetReady = Debug.isDebugBuild;
+            if (Debug.isDebugBuild)
+                Debug.Log($"Bottle reset timing: particles={fluid.particleCount}, grid={gridMs:F2}ms, " +
+                    $"initialize={initializeMs:F2}ms, fill={fillMs:F2}ms, " +
+                    $"total={resetTimer.Elapsed.TotalMilliseconds:F2}ms, calibrating={fluid.IsCalibrating}", this);
         }
 
         public void SelectParticleCount(int count)
         {
-            if (count != 16384 && count != 32768 && count != 65536)
-                throw new ArgumentOutOfRangeException(nameof(count), "Choose 16K, 32K or 64K.");
+            if (count != 16384 && count != 32768 && count != 65536 && count != 131072)
+                throw new ArgumentOutOfRangeException(nameof(count), "Choose 16K, 32K, 64K or 128K.");
             if (!ready) throw new InvalidOperationException(Error ?? "Bottle is not ready.");
             if (count == requestedParticleCount) return;
             requestedParticleCount = count;
+            particleSlider = SliderForParticleCount(count);
             resetRequested = true;
             dragging = false;
         }
@@ -139,7 +185,20 @@ namespace WaterSplash
 
         public void ToggleRendering() => SetSurfaceRendering(!fluid.renderSurface);
 
-        public static int SubstepsForParticleCount(int count) => count >= 131072 ? 8 : 6;
+        public static int SubstepsForParticleCount(int count) => 8;
+
+        public static int ParticleCountForSlider(float value) => 16384 << Mathf.Clamp(Mathf.RoundToInt(value), 0, 3);
+        public static int SliderForParticleCount(int count)
+        {
+            switch (count)
+            {
+                case 16384: return 0;
+                case 32768: return 1;
+                case 65536: return 2;
+                case 131072: return 3;
+                default: throw new ArgumentOutOfRangeException(nameof(count));
+            }
+        }
 
         void Update()
         {
@@ -147,6 +206,12 @@ namespace WaterSplash
             if (resetRequested && !pending) ResetWater();
             if (Input.GetKeyDown(KeyCode.R)) ResetWater();
             if (Input.GetKeyDown(KeyCode.Space)) fluid.paused = !fluid.paused;
+            if (waitingForResetReady && !fluid.IsCalibrating)
+            {
+                waitingForResetReady = false;
+                Debug.Log($"Bottle reset ready: particles={fluid.particleCount}, " +
+                    $"afterResetMs={(Time.realtimeSinceStartupAsDouble - resetCompletedAt) * 1000:F2}", this);
+            }
             if (fluid.Error != null || fluid.RenderingError != null)
             {
                 Fail(fluid.Error ?? fluid.RenderingError);
@@ -260,7 +325,7 @@ namespace WaterSplash
         void UpdatePointer()
         {
             Vector2 point = Input.mousePosition;
-            if (Input.GetMouseButtonDown(0)) BeginBoatDrag(point);
+            if (Input.GetMouseButtonDown(0) && (tagRope == null || !tagRope.IsGrabbing)) BeginBoatDrag(point);
             if (dragging) DragBoat(point);
             if (Input.GetMouseButtonUp(0)) EndBoatDrag();
         }
@@ -322,14 +387,22 @@ namespace WaterSplash
             return false;
         }
 
+        public bool IsPointerOnControls(Vector2 screenPoint) => PointerOnControls(screenPoint);
+
         bool PointerOnControls(Vector2 screenPoint)
         {
             float scale = UiScale();
             return ControlsRect(scale).Contains(new Vector2(screenPoint.x / scale, (Screen.height - screenPoint.y) / scale));
         }
 
-        void OnApplicationPause(bool value) { suspended = value; skipDelta = true; dragging = false; }
-        void OnApplicationFocus(bool value) { if (!value) { skipDelta = true; dragging = false; } }
+        void OnApplicationPause(bool value) { suspended = value; skipDelta = true; dragging = false; CancelSliderGesture(); }
+        void OnApplicationFocus(bool value) { if (!value) { skipDelta = true; dragging = false; CancelSliderGesture(); } }
+
+        void CancelSliderGesture()
+        {
+            sliderDragging = false;
+            particleSlider = SliderForParticleCount(requestedParticleCount);
+        }
 
         void Fail(string message)
         {
@@ -340,6 +413,7 @@ namespace WaterSplash
 
         void OnDestroy()
         {
+            Shader.SetGlobalFloat("_VoyageReflectionStrength", 0);
             generation++;
             if (pending) pendingRequest.WaitForCompletion();
             partials?.Release();
@@ -353,17 +427,7 @@ namespace WaterSplash
         static Rect ControlsRect(float scale)
         {
             Rect safe = Screen.safeArea;
-            float extra = Debug.isDebugBuild ? 36 : 0;
-            return new Rect(safe.xMax / scale - 456, (Screen.height - safe.yMin) / scale - 78 - extra, 420, 72 + extra);
-        }
-
-        static bool Choice(Rect rect, string text, bool selected)
-        {
-            Color previous = GUI.backgroundColor;
-            if (selected) GUI.backgroundColor = new Color(.56f, .86f, .82f);
-            bool pressed = GUI.Button(rect, text);
-            GUI.backgroundColor = previous;
-            return pressed;
+            return new Rect(safe.xMax / scale - 610, (Screen.height - safe.yMin) / scale - 88, 574, 58);
         }
 
         void OnGUI()
@@ -374,9 +438,9 @@ namespace WaterSplash
                 titleStyle = new GUIStyle(GUI.skin.label) { fontSize = 25, fontStyle = FontStyle.Normal };
                 subtitleStyle = new GUIStyle(GUI.skin.label) { fontSize = 14 };
                 footStyle = new GUIStyle(GUI.skin.label) { fontSize = 11 };
-                titleStyle.normal.textColor = new Color(.26f, .22f, .25f);
-                subtitleStyle.normal.textColor = new Color(.4f, .33f, .34f);
-                footStyle.normal.textColor = new Color(.4f, .33f, .34f);
+                titleStyle.normal.textColor = captionColor;
+                subtitleStyle.normal.textColor = Color.Lerp(captionColor,new Color(.5f,.5f,.5f),.25f);
+                footStyle.normal.textColor = Color.Lerp(captionColor,new Color(.5f,.5f,.5f),.25f);
             }
             Matrix4x4 previous = GUI.matrix;
             float scale = UiScale();
@@ -387,44 +451,40 @@ namespace WaterSplash
             GUI.Label(new Rect(x, top, 640, 40), "T I D E   I N   A   B O T T L E", titleStyle);
             GUI.Label(new Rect(x + 2, top + 39, 600, 28), "a little ocean, a long way home.", subtitleStyle);
             float bottom = (Screen.height - safe.yMin) / scale - 38;
-            GUI.Label(new Rect(x, bottom, 750, 30), Error ??
-                "DRAG THE SAILBOAT     /     SPACE TO PAUSE     /     R TO RESET", footStyle);
+            GUI.Label(new Rect(x, bottom, 750, 30), Error ?? (Application.isMobilePlatform ?
+                "DRAG THE SAILBOAT     /     SLIDE TO SET PARTICLES" :
+                "DRAG THE SAILBOAT     /     SPACE TO PAUSE     /     R TO RESET"), footStyle);
             if (Debug.isDebugBuild)
                 GUI.Label(new Rect(x, bottom - 22, 750, 25), string.Format(
-                    "{0}K MLS-MPM | {1:F0} FPS | {2} steps | {3} | groups {5} | p2g {6} sort {7} | backlog {4:F3}s",
+                    "{0}K particles | {1:F0} FPS | physics backlog {2:F3}s",
                     fluid == null ? 0 : fluid.particleCount / 1024,
-                    meanFrame > 0 ? 1 / meanFrame : 0, fluid == null ? 0 : fluid.substeps,
-                    fluid == null ? Vector3Int.zero : fluid.GridDimensions, backlog,
-                    fluid == null ? "-" : fluid.GroupSizeSummary,
-                    fluid == null ? "-" : fluid.ActiveP2gMode.ToString(), fluid == null ? 0 : fluid.mlsSortInterval), footStyle);
+                    meanFrame > 0 ? 1 / meanFrame : 0, backlog), footStyle);
             if (ready && Error == null && fluid.IsCalibrating)
                 GUI.Label(new Rect(x, bottom - 44, 750, 25), string.Format(fluid.IsBenchmarkingP2g ?
-                    "Benchmarking P2G modes  {0:P0}" : "Tuning compute for this GPU  {0:P0}  (first launch only)",
+                    "Benchmarking P2G modes  {0:P0}" : "Measuring GPU compute  {0:P0}",
                     fluid.CalibrationProgress), footStyle);
             if (ready && Error == null)
             {
                 Rect controls = ControlsRect(scale);
-                float bx = controls.x, by = controls.yMax - 66;
-                if (Choice(new Rect(bx, by, 64, 30), "16K", fluid.particleCount == 16384)) SelectParticleCount(16384);
-                if (Choice(new Rect(bx + 70, by, 64, 30), "32K", fluid.particleCount == 32768)) SelectParticleCount(32768);
-                if (Choice(new Rect(bx + 140, by, 64, 30), "64K", fluid.particleCount == 65536)) SelectParticleCount(65536);
-                if (GUI.Button(new Rect(bx + 216, by, 198, 30),
-                    fluid.renderSurface ? "Water  >  Particles" : "Particles  >  Water")) ToggleRendering();
-                if (GUI.Button(new Rect(bx + 216, by + 36, 96, 30), fluid.paused ? "Resume" : "Pause"))
-                    fluid.paused = !fluid.paused;
-                if (GUI.Button(new Rect(bx + 318, by + 36, 96, 30), "Begin again")) ResetWater();
-                if (Debug.isDebugBuild && !fluid.IsCalibrating &&
-                    GUI.Button(new Rect(bx, by + 36, 204, 30), "Measure GPU kernels"))
-                    fluid.StartGroupSizeCalibration(3);
-                if (Debug.isDebugBuild && !fluid.IsCalibrating)
+                float bx = controls.x, by = controls.y;
+                Rect sliderRect = new Rect(bx + 6, by + 9, 278, 28);
+                EventType rawType = Event.current.rawType;
+                float previousSlider = particleSlider;
+                particleSlider = GUI.HorizontalSlider(sliderRect, particleSlider, 0, 3);
+                if (!Mathf.Approximately(previousSlider, particleSlider)) sliderDragging = true;
+                GUI.Label(new Rect(bx + 304, by + 5, 66, 30), (ParticleCountForSlider(particleSlider) / 1024) + "K", subtitleStyle);
+                GUI.Label(new Rect(bx + 3, by + 32, 48, 20), "16K", footStyle);
+                GUI.Label(new Rect(bx + 88, by + 32, 48, 20), "32K", footStyle);
+                GUI.Label(new Rect(bx + 177, by + 32, 48, 20), "64K", footStyle);
+                GUI.Label(new Rect(bx + 259, by + 32, 48, 20), "128K", footStyle);
+                if (sliderDragging && rawType == EventType.MouseUp)
                 {
-                    if (GUI.Button(new Rect(bx, by - 36, 98, 30), "Bench P2G")) fluid.StartP2gBenchmark(3);
-                    if (GUI.Button(new Rect(bx + 106, by - 36, 98, 30),
-                        fluid.mlsSortInterval == 0 ? "Sort off" : "Sort /" + fluid.mlsSortInterval))
-                        fluid.mlsSortInterval = fluid.mlsSortInterval == 0 ? 1 : fluid.mlsSortInterval == 1 ? 4 : 0;
-                    if (GUI.Button(new Rect(bx + 216, by - 36, 198, 30), "P2G  " + fluid.p2gMode))
-                        fluid.p2gMode = (MlsMpmFluid.P2gMode)(((int)fluid.p2gMode + 1) % 4);
+                    sliderDragging = false;
+                    particleSlider = Mathf.Round(particleSlider);
+                    SelectParticleCount(ParticleCountForSlider(particleSlider));
                 }
+                if (GUI.Button(new Rect(bx + 383, by + 5, 190, 32),
+                    fluid.renderSurface ? "Water  >  Particles" : "Particles  >  Water")) ToggleRendering();
             }
             GUI.matrix = previous;
         }

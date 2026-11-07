@@ -7,11 +7,21 @@ namespace WaterSplash.Tests
 {
     public sealed class BottleVoyageTests
     {
-        [TestCase(16384, 6)]
-        [TestCase(32768, 6)]
-        [TestCase(65536, 6)]
+        [TestCase(0, 16384)]
+        [TestCase(1, 32768)]
+        [TestCase(2, 65536)]
+        [TestCase(3, 131072)]
+        public void ParticleSliderRoundTripsAllTiers(int index, int count)
+        {
+            Assert.That(BottleVoyage.ParticleCountForSlider(index), Is.EqualTo(count));
+            Assert.That(BottleVoyage.SliderForParticleCount(count), Is.EqualTo(index));
+        }
+
+        [TestCase(16384, 8)]
+        [TestCase(32768, 8)]
+        [TestCase(65536, 8)]
         [TestCase(131072, 8)]
-        public void BottleSubstepsFollowParticleTier(int count, int steps)
+        public void BottleSubstepsStayAtEightForParticleTier(int count, int steps)
         {
             Assert.That(BottleVoyage.SubstepsForParticleCount(count), Is.EqualTo(steps));
         }

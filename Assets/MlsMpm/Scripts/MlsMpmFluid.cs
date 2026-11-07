@@ -105,6 +105,8 @@ namespace WaterSplash
         public GroupSizeMode groupSizeMode;
         [Tooltip("Bottle MLS only: particle-to-grid transfer variant. Can be switched at runtime.")]
         public P2gMode p2gMode;
+        [Tooltip("Use compact packed grid sums and prevalidated bottle transfer stencils. Runtime-switchable for GPU comparisons.")]
+        public bool optimizeTransfers;
         [Tooltip("Bottle MLS only: reorder particles by 4^3 grid blocks every N ticks (0 = never) to localize P2G atomics.")]
         [Range(0, 16)] public int mlsSortInterval;
         [Tooltip("PB-MPM only: reorder particles by 4^3 grid blocks every N ticks.")]
@@ -193,6 +195,11 @@ namespace WaterSplash
         bool supportsGroupVariants;
         readonly int[] fusedKernels = { -1, -1 };
         bool supportsP2gVariants;
+        bool supportsOptimizedTransfers;
+        readonly int[] optimizedFused = { -1, -1 };
+        readonly int[] optimizedGather = { -1, -1 };
+        readonly int[] optimizedGrid = { -1, -1 };
+        readonly int[] optimizedClear = { -1, -1 };
         const float PackedMomentumScale = 32;
         public P2gMode ActiveP2gMode => supportsP2gVariants ? p2gMode : P2gMode.TwoPass;
         static readonly CustomSampler mlsSortSampler = CustomSampler.Create("MLS-MPM GPU/Spatial sort", true);
@@ -337,6 +344,20 @@ namespace WaterSplash
             {
                 fusedKernels[0] = solver.FindKernel("TransferFused");
                 fusedKernels[1] = solver.FindKernel("TransferFused64");
+            }
+            supportsOptimizedTransfers = supportsP2gVariants && solver.HasKernel("TransferFusedOptimized") &&
+                solver.HasKernel("ClearGridOptimized") && solver.HasKernel("UpdateGridOptimized") &&
+                solver.HasKernel("UpdateParticlesOptimized");
+            if (supportsOptimizedTransfers)
+            {
+                optimizedFused[0] = solver.FindKernel("TransferFusedOptimized");
+                optimizedFused[1] = solver.FindKernel("TransferFusedOptimized64");
+                optimizedGather[0] = solver.FindKernel("UpdateParticlesOptimized");
+                optimizedGather[1] = solver.FindKernel("UpdateParticlesOptimized64");
+                optimizedGrid[0] = solver.FindKernel("UpdateGridOptimized");
+                optimizedGrid[1] = solver.FindKernel("UpdateGridOptimized64");
+                optimizedClear[0] = solver.FindKernel("ClearGridOptimized");
+                optimizedClear[1] = solver.FindKernel("ClearGridOptimized64");
             }
             cacheGridKernel = solver.HasKernel("CacheBottleBoundary") ? solver.FindKernel("CacheBottleBoundary") : -1;
             gridBoundaryReady = false;
@@ -525,6 +546,33 @@ namespace WaterSplash
                 target.SetBuffer(kernel, "_Diagnostics", diagnosticBuffer);
                 target.SetBuffer(kernel, "_Particles", particleBuffer);
             }
+            if (supportsOptimizedTransfers)
+            {
+                foreach (int kernel in optimizedFused)
+                {
+                    target.SetBuffer(kernel, "_Accumulation", accumulationBuffer);
+                    target.SetBuffer(kernel, "_Diagnostics", diagnosticBuffer);
+                    target.SetBuffer(kernel, "_Particles", particleBuffer);
+                }
+                foreach (int kernel in optimizedGather)
+                {
+                    target.SetBuffer(kernel, "_Grid", gridBuffer);
+                    target.SetBuffer(kernel, "_Diagnostics", diagnosticBuffer);
+                    target.SetBuffer(kernel, "_Particles", particleBuffer);
+                }
+                foreach (int kernel in optimizedGrid)
+                {
+                    target.SetBuffer(kernel,"_Accumulation",accumulationBuffer);
+                    target.SetBuffer(kernel,"_Grid",gridBuffer);
+                    target.SetBuffer(kernel,"_Diagnostics",diagnosticBuffer);
+                    if (staticGridBoundary != null) target.SetBuffer(kernel,"_StaticGridBoundary",staticGridBoundary);
+                }
+                foreach (int kernel in optimizedClear)
+                {
+                    target.SetBuffer(kernel,"_Accumulation",accumulationBuffer);
+                    target.SetBuffer(kernel,"_Grid",gridBuffer);
+                }
+            }
         }
 
         void SetP2gParameters(CommandBuffer cb, ComputeShader target, P2gMode mode)
@@ -544,6 +592,13 @@ namespace WaterSplash
                 if (fused && stage == 2) continue;
                 int size = groupSizes[stage];
                 int kernel = fused && stage == 1 ? fusedKernels[size == 64 ? 1 : 0] : StageKernel(stage, size);
+                if (optimizeTransfers && supportsOptimizedTransfers)
+                {
+                    if (stage == 0) kernel = optimizedClear[size == 64 ? 1 : 0];
+                    if (fused && stage == 1) kernel = optimizedFused[size == 64 ? 1 : 0];
+                    if (stage == 3) kernel = optimizedGrid[size == 64 ? 1 : 0];
+                    if (stage == 4) kernel = optimizedGather[size == 64 ? 1 : 0];
+                }
                 if (sample) cb.BeginSample(gpuStages[stage]);
                 cb.DispatchCompute(target, kernel, StageGroups(stage, size), 1, 1);
                 if (sample) cb.EndSample(gpuStages[stage]);

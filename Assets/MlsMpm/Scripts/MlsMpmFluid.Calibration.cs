@@ -28,6 +28,7 @@ namespace WaterSplash
         sealed class GroupCalibration
         {
             public bool p2g;
+            public bool transfers;
             public int conditions;
             public int rounds;
             public int block;
@@ -123,6 +124,21 @@ namespace WaterSplash
             return true;
         }
 
+        public bool StartTransferBenchmark(int rounds = 4)
+        {
+            if (!IsInitialized || Error != null || !supportsOptimizedTransfers || !Application.isPlaying) return false;
+            rounds = Mathf.Clamp(rounds, 2, 8);
+            var order = new int[rounds * 4];
+            for (int r = 0; r < rounds; r++)
+            {
+                order[r * 4] = 0;
+                for (int i = 0; i < 3; i++) order[r * 4 + i + 1] = 1 + (i + r) % 3;
+            }
+            BeginCalibration(false, 4, rounds, order);
+            calibration.transfers = true;
+            return true;
+        }
+
         void BeginCalibration(bool p2g, int conditions, int rounds, int[] order)
         {
             ReleaseCalibration();
@@ -185,7 +201,7 @@ namespace WaterSplash
             if (c.encoded >= CalibrationBlockFrames)
             {
                 c.encoded = 0;
-                if (c.p2g)
+                if (c.p2g || c.transfers)
                 {
                     // A faulted scratch solver early-outs and would time as free; attribute and clear.
                     var flags = new uint[8];
@@ -195,7 +211,8 @@ namespace WaterSplash
                 }
                 if (++c.block >= c.order.Length)
                 {
-                    if (c.p2g) FinishP2gBenchmark(); else FinishCalibration();
+                    if (c.transfers) FinishTransferBenchmark();
+                    else if (c.p2g) FinishP2gBenchmark(); else FinishCalibration();
                     return;
                 }
             }
@@ -222,7 +239,19 @@ namespace WaterSplash
             for (int step = 0; step < substeps; step++)
             for (int stage = 0; stage < kernels.Length; stage++)
                 cb.DispatchCompute(c.shader, kernels[stage], StageGroups(stage, 128), 1, 1);
-            if (condition > 0 && c.p2g)
+            if (condition > 0 && c.transfers)
+            {
+                bool previous = optimizeTransfers;
+                int[] sizes = (int[])groupSizes.Clone();
+                optimizeTransfers = condition != 1;
+                for (int i = 0; i < groupSizes.Length; i++) groupSizes[i] = condition == 3 ? 64 : 128;
+                SetP2gParameters(cb, c.shader, ActiveP2gMode);
+                for (int repetition = 0; repetition < 16; repetition++)
+                    EncodeMlsSubstep(cb, c.shader, ActiveP2gMode, false);
+                optimizeTransfers = previous;
+                Array.Copy(sizes, groupSizes, sizes.Length);
+            }
+            else if (condition > 0 && c.p2g)
             {
                 bool sorted = condition > P2gModeCount;
                 if (sorted) EncodeSpatialSort(cb, c.shader);
@@ -242,6 +271,22 @@ namespace WaterSplash
                     cb.DispatchCompute(c.shader, StageKernel(stage, size), StageGroups(stage, size), 1, 1);
             }
             Graphics.ExecuteCommandBuffer(cb);
+        }
+
+        void FinishTransferBenchmark()
+        {
+            var c = calibration;
+            bool gpu = true;
+            for (int i = 0; i < c.conditions; i++) gpu &= c.gpu[i].Count >= 3;
+            var medians = new double[c.conditions];
+            for (int i = 0; i < medians.Length; i++) medians[i] = Median(gpu ? c.gpu[i] : c.cpu[i]);
+            LastCalibrationReport = string.Format(CultureInfo.InvariantCulture,
+                "MLS-MPM transfer benchmark: timing={0} gpu='{1}' particles={2} substeps={3} base={4:F3}ms reference128={5:F4}ms optimized128={6:F4}ms optimized64={7:F4}ms faults={8}/{9}/{10}/{11}",
+                gpu ? "GPU" : "CPU-interval", SystemInfo.graphicsDeviceName, activeCount, substeps, medians[0],
+                (medians[1] - medians[0]) / 16, (medians[2] - medians[0]) / 16, (medians[3] - medians[0]) / 16,
+                c.faults[0], c.faults[1], c.faults[2], c.faults[3]);
+            Debug.Log(LastCalibrationReport, this);
+            ReleaseCalibration();
         }
 
         // Condition layout: 0 base, 1..4 modes, 5 sort only, 6..9 sort + modes.

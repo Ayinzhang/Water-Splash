@@ -163,21 +163,14 @@ void PbIntegrate(uint id : SV_DispatchThreadID)
         velocity = SphereBoundary(_Sphere.xyz + normal * (_Sphere.w * 0.999), velocity);
         contact = true;
     }
-    for (int axis = 0; axis < 3; axis++)
-    {
-        if (position[axis] < 2)
-        {
-            position[axis] = 2;
-            velocity[axis] = max(velocity[axis], 0);
-            contact = true;
-        }
-        if (position[axis] > _Resolution - 3)
-        {
-            position[axis] = _Resolution - 3;
-            velocity[axis] = min(velocity[axis], 0);
-            contact = true;
-        }
-    }
+    float3 lowerContact = float3(position.x < 2, position.y < 2, position.z < 2);
+    float upperLimit = _Resolution - 3;
+    float3 upperContact = float3(position.x > upperLimit, position.y > upperLimit,
+        position.z > upperLimit);
+    position = clamp(position, 2, upperLimit);
+    velocity = lerp(velocity, max(velocity, 0), lowerContact);
+    velocity = lerp(velocity, min(velocity, 0), upperContact);
+    contact = contact || any(lowerContact > 0) || any(upperContact > 0);
     p.position = float4(position, 1);
     p.velocity.xyz = velocity;
     p.affineX.xyz = contact ? 0 : p.affineX.xyz / _Dt;

@@ -27,6 +27,14 @@
 #pragma kernel CopyProbeParticles
 #pragma kernel TransferFused
 #pragma kernel TransferFused64
+#pragma kernel TransferFusedOptimized MPM_OPTIMIZED_TRANSFERS MPM_COMPACT_ACCUMULATION
+#pragma kernel TransferFusedOptimized64 MPM_OPTIMIZED_TRANSFERS MPM_COMPACT_ACCUMULATION
+#pragma kernel UpdateGridOptimized MPM_COMPACT_ACCUMULATION
+#pragma kernel UpdateGridOptimized64 MPM_COMPACT_ACCUMULATION
+#pragma kernel ClearGridOptimized MPM_COMPACT_ACCUMULATION
+#pragma kernel ClearGridOptimized64 MPM_COMPACT_ACCUMULATION
+#pragma kernel UpdateParticlesOptimized MPM_OPTIMIZED_TRANSFERS
+#pragma kernel UpdateParticlesOptimized64 MPM_OPTIMIZED_TRANSFERS
 
 #include "MlsMpmWhitewater.hlsl"
 
@@ -142,8 +150,13 @@ float3 AffineVelocity(Particle p, float3 offset)
 void ClearGridCell(uint id)
 {
     if (id >= (uint)_CellCount) return;
-    for (uint channel = 0; channel < 4; channel++)
-        _Accumulation[id * 4 + channel] = 0;
+#if defined(MPM_COMPACT_ACCUMULATION)
+    uint channels = _PackedAccumulation != 0 ? 2u : 4u;
+#else
+    uint channels = 4;
+#endif
+    for (uint channel = 0; channel < channels; channel++)
+        _Accumulation[id * channels + channel] = 0;
     _Grid[id] = 0;
 }
 
@@ -226,7 +239,7 @@ void TransferFusedParticle(uint id)
     float ratio = p.velocity.w > 0 ? p.velocity.w : 1.0;
     float density = ratio * _RestDensity;
     float compression = _PressureExponent == 3 ? ratio * ratio * ratio :
-        (_PressureExponent == 1 ? ratio : pow(ratio, _PressureExponent));
+        (_PressureExponent == 1 ? ratio : pow(abs(ratio), _PressureExponent));
     float pressure = _BulkModulus * max(compression - 1.0, 0.0);
     float3x3 c = float3x3(p.affineX.xyz, p.affineY.xyz, p.affineZ.xyz);
     float3x3 stress = _Viscosity * (c + transpose(c));
@@ -235,15 +248,33 @@ void TransferFusedParticle(uint id)
     stress[2][2] -= pressure;
     float3x3 q = c + (-4.0 * _Dt / density) * stress;
 
+#if defined(MPM_OPTIMIZED_TRANSFERS)
+    // Validate the complete 3x3x3 footprint once. Invalid stencils still stop
+    // with the same fault; valid stencils need no per-node vector bounds tests.
+    int3 localOrigin = origin - _GridOffset;
+    if (any(localOrigin < 0) || any(localOrigin + 2 >= _GridSize)) { Fault(4, id); return; }
+    uint firstCell = CellIndex(origin);
+    uint sliceStride = _GridSize.x * _GridSize.y;
+#endif
     for (int z = 0; z < 3; z++)
     for (int y = 0; y < 3; y++)
+#if defined(MPM_OPTIMIZED_TRANSFERS)
+    [unroll]
+#endif
     for (int x = 0; x < 3; x++)
     {
         int3 cell = origin + int3(x, y, z);
+#if !defined(MPM_OPTIMIZED_TRANSFERS)
         if (!ValidCell(cell)) { Fault(4, id); continue; }
+#endif
         float weight = w[x].x * w[y].y * w[z].z;
         float3 momentum = weight * (p.velocity.xyz + mul(q, cell - p.position.xyz));
+#if defined(MPM_OPTIMIZED_TRANSFERS)
+        uint address = (firstCell + x + y * _GridSize.x + z * sliceStride) *
+            (_PackedAccumulation != 0 ? 2u : 4u);
+#else
         uint address = CellIndex(cell) * 4;
+#endif
         if (_PackedAccumulation != 0)
         {
             AccumulatePacked(address, (int)round(weight * PackedMassScale),
@@ -306,7 +337,7 @@ void TransferStressParticle(uint id, inout uint peak)
     _Particles[ParticleFieldIndex(id, 1)].w = ratio;
 
     float compression = _PressureExponent == 3 ? ratio * ratio * ratio :
-        (_PressureExponent == 1 ? ratio : pow(ratio, _PressureExponent));
+        (_PressureExponent == 1 ? ratio : pow(abs(ratio), _PressureExponent));
     float pressure = _BulkModulus * max(compression - 1.0, 0.0);
     float3x3 c = float3x3(p.affineX.xyz, p.affineY.xyz, p.affineZ.xyz);
     float3x3 stress = _Viscosity * (c + transpose(c));
@@ -364,7 +395,11 @@ void CacheBottleBoundary(uint id : SV_DispatchThreadID)
 void UpdateGridCell(uint id)
 {
     if (id >= (uint)_CellCount || _Diagnostics[0] != 0) return;
+#if defined(MPM_COMPACT_ACCUMULATION)
+    uint address = id * (_PackedAccumulation != 0 ? 2u : 4u);
+#else
     uint address = id * 4;
+#endif
     float mass = 0;
     float3 momentum = 0;
     if (_PackedAccumulation != 0)
@@ -416,14 +451,29 @@ void UpdateParticle(uint id, inout uint peak, inout uint densityPeak)
     float3 cx = 0, cy = 0, cz = 0;
     float density = 0;
 
+#if defined(MPM_OPTIMIZED_TRANSFERS)
+    int3 localOrigin = origin - _GridOffset;
+    if (any(localOrigin < 0) || any(localOrigin + 2 >= _GridSize)) { Fault(4, id); return; }
+    uint firstCell = CellIndex(origin);
+    uint sliceStride = _GridSize.x * _GridSize.y;
+#endif
     for (int z = 0; z < 3; z++)
     for (int y = 0; y < 3; y++)
+#if defined(MPM_OPTIMIZED_TRANSFERS)
+    [unroll]
+#endif
     for (int x = 0; x < 3; x++)
     {
         int3 cell = origin + int3(x, y, z);
+#if !defined(MPM_OPTIMIZED_TRANSFERS)
         if (!ValidCell(cell)) { Fault(4, id); continue; }
+#endif
         float weight = w[x].x * w[y].y * w[z].z;
+#if defined(MPM_OPTIMIZED_TRANSFERS)
+        float4 node = _Grid[firstCell + x + y * _GridSize.x + z * sliceStride];
+#else
         float4 node = _Grid[CellIndex(cell)];
+#endif
         float3 weighted = weight * node.xyz;
         density += weight * node.w;
         float3 offset = cell - p.position.xyz;
@@ -503,6 +553,8 @@ void UpdateParticlesGroup(uint id, uint lane)
 // Identical solver kernels in two workgroup sizes; the runtime picks per GPU.
 [numthreads(128, 1, 1)] void ClearGrid(uint id : SV_DispatchThreadID) { ClearGridCell(id); }
 [numthreads(64, 1, 1)] void ClearGrid64(uint id : SV_DispatchThreadID) { ClearGridCell(id); }
+[numthreads(128, 1, 1)] void ClearGridOptimized(uint id : SV_DispatchThreadID) { ClearGridCell(id); }
+[numthreads(64, 1, 1)] void ClearGridOptimized64(uint id : SV_DispatchThreadID) { ClearGridCell(id); }
 [numthreads(128, 1, 1)] void TransferMass(uint id : SV_DispatchThreadID) { TransferMassParticle(id); }
 [numthreads(64, 1, 1)] void TransferMass64(uint id : SV_DispatchThreadID) { TransferMassParticle(id); }
 [numthreads(128, 1, 1)]
@@ -511,12 +563,20 @@ void TransferStress(uint id : SV_DispatchThreadID, uint lane : SV_GroupIndex) { 
 void TransferStress64(uint id : SV_DispatchThreadID, uint lane : SV_GroupIndex) { TransferStressGroup(id, lane); }
 [numthreads(128, 1, 1)] void TransferFused(uint id : SV_DispatchThreadID) { TransferFusedParticle(id); }
 [numthreads(64, 1, 1)] void TransferFused64(uint id : SV_DispatchThreadID) { TransferFusedParticle(id); }
+[numthreads(128, 1, 1)] void TransferFusedOptimized(uint id : SV_DispatchThreadID) { TransferFusedParticle(id); }
+[numthreads(64, 1, 1)] void TransferFusedOptimized64(uint id : SV_DispatchThreadID) { TransferFusedParticle(id); }
 [numthreads(128, 1, 1)] void UpdateGrid(uint id : SV_DispatchThreadID) { UpdateGridCell(id); }
 [numthreads(64, 1, 1)] void UpdateGrid64(uint id : SV_DispatchThreadID) { UpdateGridCell(id); }
+[numthreads(128, 1, 1)] void UpdateGridOptimized(uint id : SV_DispatchThreadID) { UpdateGridCell(id); }
+[numthreads(64, 1, 1)] void UpdateGridOptimized64(uint id : SV_DispatchThreadID) { UpdateGridCell(id); }
 [numthreads(128, 1, 1)]
 void UpdateParticles(uint id : SV_DispatchThreadID, uint lane : SV_GroupIndex) { UpdateParticlesGroup(id, lane); }
 [numthreads(64, 1, 1)]
 void UpdateParticles64(uint id : SV_DispatchThreadID, uint lane : SV_GroupIndex) { UpdateParticlesGroup(id, lane); }
+[numthreads(128, 1, 1)]
+void UpdateParticlesOptimized(uint id : SV_DispatchThreadID, uint lane : SV_GroupIndex) { UpdateParticlesGroup(id, lane); }
+[numthreads(64, 1, 1)]
+void UpdateParticlesOptimized64(uint id : SV_DispatchThreadID, uint lane : SV_GroupIndex) { UpdateParticlesGroup(id, lane); }
 
 // Calibration only: copies live particle streams into scratch probe storage.
 StructuredBuffer<float4> _ProbeSource;
@@ -565,6 +625,8 @@ float4 WhitewaterFlow(float3 position)
 
 bool WhitewaterSurface(float3 position, float density, out float3 normal, out float gradientSize)
 {
+    normal = 0;
+    gradientSize = 0;
     int3 cell = (int3)round(position);
     float3 gradient = 0.5 * float3(
         WhitewaterMass(cell + int3(1,0,0)) - WhitewaterMass(cell - int3(1,0,0)),

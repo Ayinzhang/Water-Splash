@@ -26,7 +26,7 @@ Shader "WaterSplash/Bottle Sunset"
                 float2 shadow=(uv-float2(.5,.30))/float2(.26,.025);
                 color*=1-.18*exp(-dot(shadow,shadow)*2);
                 float grain=frac(sin(dot(floor(uv*1800),float2(127.1,311.7)))*43758.5453);
-                return half4(color+(grain-.5)*.009,1);
+                return half4(color+(grain-.5)*.002,1);
             }
             ENDHLSL
         }

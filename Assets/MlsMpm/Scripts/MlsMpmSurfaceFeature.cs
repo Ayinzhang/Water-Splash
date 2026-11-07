@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
+using UnityEngine.Rendering.RenderGraphModule;
 using UnityEngine.Rendering.Universal;
 
 namespace WaterSplash
@@ -134,6 +135,7 @@ namespace WaterSplash
             RTHandle cameraDepth;
             int width;
             int height;
+            Rect cameraViewport;
             int iterations;
             float radius;
             RectInt scissor;
@@ -142,6 +144,7 @@ namespace WaterSplash
 
             public SurfacePass(MlsMpmSurfaceFeature feature) => owner = feature;
 
+#if !UNITY_6000_0_OR_NEWER
             public override void OnCameraSetup(CommandBuffer cmd, ref RenderingData renderingData)
             {
                 var quality = MlsMpmFluid.SurfaceQuality.Low;
@@ -283,6 +286,151 @@ namespace WaterSplash
                     CommandBufferPool.Release(cmd);
                 }
             }
+#else
+            sealed class GraphPassData
+            {
+                public SurfacePass pass;
+                public Camera camera;
+                public TextureHandle color, depth, raw, particleDepth, smoothA, smoothB, thickness, normals, foam;
+            }
+
+            public override void RecordRenderGraph(RenderGraph graph, ContextContainer frameData)
+            {
+                var cameraData = frameData.Get<UniversalCameraData>();
+                var resources = frameData.Get<UniversalResourceData>();
+                Camera camera = cameraData.camera;
+                if (camera.cameraType != CameraType.Game || !resources.activeColorTexture.IsValid() ||
+                    !resources.activeDepthTexture.IsValid()) return;
+
+                var quality = MlsMpmFluid.SurfaceQuality.Low;
+                radius = 0;
+                foreach (var fluid in owner.visible)
+                {
+                    if (fluid.surfaceQuality > quality) quality = fluid.surfaceQuality;
+                    radius = Mathf.Max(radius, fluid.SurfaceParticleRadius);
+                }
+                int divisor = quality == MlsMpmFluid.SurfaceQuality.High ? 1 : 2;
+                iterations = quality == MlsMpmFluid.SurfaceQuality.Low ? 2 : quality == MlsMpmFluid.SurfaceQuality.Medium ? 3 : 4;
+                var desc = cameraData.cameraTargetDescriptor;
+                cameraViewport = camera.pixelRect;
+                width = Mathf.Max(1, (desc.width + divisor - 1) / divisor);
+                height = Mathf.Max(1, (desc.height + divisor - 1) / divisor);
+                scissor = new RectInt(0, 0, width, height);
+                if (owner.cropToFluidBounds)
+                {
+                    Bounds bounds = owner.visible[0].SurfaceBounds;
+                    for (int i = 1; i < owner.visible.Count; i++) bounds.Encapsulate(owner.visible[i].SurfaceBounds);
+                    scissor = CalculateSurfaceScissor(camera, bounds, width, height);
+                }
+                cropped = !scissor.Equals(new RectInt(0, 0, width, height));
+                float sx = (float)desc.width / width, sy = (float)desc.height / height;
+                cameraScissor = Rect.MinMaxRect(Mathf.Floor(scissor.xMin * sx), Mathf.Floor(scissor.yMin * sy),
+                    Mathf.Ceil(scissor.xMax * sx), Mathf.Ceil(scissor.yMax * sy));
+                desc.width = width; desc.height = height; desc.msaaSamples = 1; desc.bindMS = false;
+                desc.useMipMap = false; desc.autoGenerateMips = false; desc.useDynamicScale = false;
+                desc.depthBufferBits = 0; desc.graphicsFormat = GraphicsFormat.R32_SFloat;
+                RenderingUtils.ReAllocateHandleIfNeeded(ref rawDepth, desc, FilterMode.Point, TextureWrapMode.Clamp, name: "_MpmRawDepth");
+                desc.graphicsFormat = GraphicsFormat.None; desc.depthBufferBits = 32;
+                RenderingUtils.ReAllocateHandleIfNeeded(ref particleDepth, desc, FilterMode.Point, TextureWrapMode.Clamp, name: "_MpmParticleDepth");
+                desc.depthBufferBits = 0; desc.graphicsFormat = GraphicsFormat.R32G32_SFloat;
+                RenderingUtils.ReAllocateHandleIfNeeded(ref smoothA, desc, FilterMode.Point, TextureWrapMode.Clamp, name: "_MpmSmoothA");
+                RenderingUtils.ReAllocateHandleIfNeeded(ref smoothB, desc, FilterMode.Point, TextureWrapMode.Clamp, name: "_MpmSmoothB");
+                desc.graphicsFormat = GraphicsFormat.R16_SFloat;
+                RenderingUtils.ReAllocateHandleIfNeeded(ref thickness, desc, FilterMode.Bilinear, TextureWrapMode.Clamp, name: "_MpmThickness");
+                desc.graphicsFormat = GraphicsFormat.R16G16_SFloat;
+                RenderingUtils.ReAllocateHandleIfNeeded(ref normals, desc, FilterMode.Point, TextureWrapMode.Clamp, name: "_MpmNormals");
+                desc.graphicsFormat = owner.detailedWhitewater ? GraphicsFormat.R16G16_SFloat : GraphicsFormat.R16_SFloat;
+                RenderingUtils.ReAllocateHandleIfNeeded(ref foam, desc, FilterMode.Bilinear, TextureWrapMode.Clamp, name: "_MpmFoam");
+
+                using (var builder = graph.AddUnsafePass<GraphPassData>("MLS-MPM Continuous Water", out var data, profiler))
+                {
+                    data.pass = this; data.camera = camera; data.color = resources.activeColorTexture; data.depth = resources.activeDepthTexture;
+                    data.raw = graph.ImportTexture(rawDepth); data.particleDepth = graph.ImportTexture(particleDepth);
+                    data.smoothA = graph.ImportTexture(smoothA); data.smoothB = graph.ImportTexture(smoothB);
+                    data.thickness = graph.ImportTexture(thickness); data.normals = graph.ImportTexture(normals); data.foam = graph.ImportTexture(foam);
+                    builder.UseTexture(data.color, AccessFlags.ReadWrite); builder.UseTexture(data.depth, AccessFlags.ReadWrite);
+                    builder.UseTexture(data.raw, AccessFlags.ReadWrite); builder.UseTexture(data.particleDepth, AccessFlags.ReadWrite);
+                    builder.UseTexture(data.smoothA, AccessFlags.ReadWrite); builder.UseTexture(data.smoothB, AccessFlags.ReadWrite);
+                    builder.UseTexture(data.thickness, AccessFlags.ReadWrite); builder.UseTexture(data.normals, AccessFlags.ReadWrite);
+                    builder.UseTexture(data.foam, AccessFlags.ReadWrite); builder.AllowPassCulling(false);
+                    builder.SetRenderFunc(static (GraphPassData d, UnsafeGraphContext c) => d.pass.ExecuteGraph(d, c.cmd));
+                }
+            }
+
+            void ExecuteGraph(GraphPassData d, UnsafeCommandBuffer cmd)
+            {
+                if (scissor.width == 0 || scissor.height == 0) { foreach (var f in owner.visible) f.MarkSurfaceRendered(); return; }
+                Matrix4x4 projection = GL.GetGPUProjectionMatrix(d.camera.projectionMatrix, true);
+                cmd.SetGlobalVector("_FluidBufferSize", new Vector4(width, height, 1f / width, 1f / height));
+                cmd.SetGlobalMatrix("_FluidInverseProjection", projection.inverse);
+                cmd.SetGlobalVector("_FluidProjectionScale", new Vector4(Mathf.Abs(projection.m00) * width * .5f,
+                    Mathf.Abs(projection.m11) * height * .5f, d.camera.orthographic ? 0 : 1, 0));
+                cmd.SetGlobalFloat("_FluidRadius", radius); cmd.SetGlobalFloat("_FluidDepthRange", Mathf.Max(radius * 4, .001f));
+                cmd.SetGlobalVector("_FluidAbsorption", new Vector4(owner.absorption.x, owner.absorption.y, owner.absorption.z, 0));
+                cmd.SetGlobalColor("_FluidWaterColor", owner.waterColor); cmd.SetGlobalFloat("_FluidRefraction", owner.refraction);
+                cmd.SetGlobalFloat("_ContinuousFoam", owner.continuousFoam ? 1 : 0); cmd.SetGlobalFloat("_DetailedWhitewater", owner.detailedWhitewater ? 1 : 0);
+                cmd.DisableScissorRect(); cmd.SetRenderTarget(d.raw, d.particleDepth);
+                cmd.SetViewport(new Rect(0, 0, width, height));
+                cmd.ClearRenderTarget(true, true, Color.clear);
+                if (cropped) cmd.EnableScissorRect(new Rect(scissor.x, scissor.y, scissor.width, scissor.height));
+                DrawGraphParticles(cmd, 0); SetGraphTarget(cmd, d.thickness, true); DrawGraphParticles(cmd, 1);
+                cmd.SetGlobalTexture("_FluidThickness", d.thickness); TextureHandle source = d.raw;
+                for (int i = 0; i < iterations; i++)
+                {
+                    cmd.SetGlobalFloat("_FluidFilterScale", owner.surfaceSmoothing * Mathf.Pow(.75f, i));
+                    SmoothGraph(cmd, source, d.smoothA, Vector2.right, i == 0); SmoothGraph(cmd, d.smoothA, d.smoothB, Vector2.up, false); source = d.smoothB;
+                }
+                cmd.SetGlobalTexture("_FluidDepth", source); SetGraphTarget(cmd, d.normals, false);
+                cmd.DrawProcedural(Matrix4x4.identity, owner.surfaceMaterial, 2, MeshTopology.Triangles, 3, 1);
+                SetGraphTarget(cmd, d.foam, true); DrawGraphWhitewater(cmd, 2, true); cmd.SetGlobalTexture("_FluidFoam", d.foam);
+                cmd.SetGlobalTexture("_FluidNormals", d.normals); cmd.DisableScissorRect(); cmd.SetRenderTarget(d.color, d.depth);
+                cmd.SetViewport(cameraViewport);
+                if (cropped) cmd.EnableScissorRect(cameraScissor);
+                cmd.DrawProcedural(Matrix4x4.identity, owner.surfaceMaterial, 1, MeshTopology.Triangles, 3, 1);
+                DrawGraphWhitewater(cmd, 3, false); cmd.DisableScissorRect(); cmd.SetViewport(cameraViewport);
+                foreach (var f in owner.visible) f.MarkSurfaceRendered();
+            }
+
+            void DrawGraphParticles(UnsafeCommandBuffer cmd, int pass)
+            {
+                foreach (var f in owner.visible)
+                {
+                    properties.Clear(); properties.SetBuffer("_Particles", f.ParticleBuffer); properties.SetInt("_ParticlePlaneStride", f.ParticlePlaneStride);
+                    properties.SetVector("_Origin", f.GridOrigin); properties.SetFloat("_CellSize", f.CellSize); properties.SetFloat("_Radius", f.SurfaceParticleRadius);
+                    properties.SetFloat("_ThicknessScale", 3f / (4 * Mathf.PI * f.surfaceRadiusScale * f.surfaceRadiusScale * f.surfaceRadiusScale));
+                    cmd.DrawProcedural(Matrix4x4.identity, owner.particleMaterial, pass, MeshTopology.Triangles, 6, f.RenderedParticleCount, properties);
+                }
+            }
+
+            void DrawGraphWhitewater(UnsafeCommandBuffer cmd, int pass, bool foamPass)
+            {
+                foreach (var f in owner.visible)
+                {
+                    if (!f.enableWhitewater || f.WhitewaterBuffer == null) continue;
+                    properties.Clear(); properties.SetBuffer("_Whitewater", f.WhitewaterBuffer);
+                    properties.SetBuffer("_WhitewaterIndices", foamPass ? f.FoamIndices : f.SprayIndices);
+                    properties.SetVector("_Origin", f.GridOrigin); properties.SetFloat("_CellSize", f.CellSize);
+                    properties.SetFloat("_WhitewaterRadius", f.WhitewaterRadius); properties.SetFloat("_WhitewaterDepthTolerance", f.SurfaceParticleRadius * 2.5f);
+                    cmd.DrawProceduralIndirect(Matrix4x4.identity, owner.particleMaterial, pass, MeshTopology.Triangles,
+                        foamPass ? f.FoamArguments : f.SprayArguments, 0, properties);
+                }
+            }
+
+            void SmoothGraph(UnsafeCommandBuffer cmd, TextureHandle src, TextureHandle dst, Vector2 direction, bool first)
+            {
+                cmd.SetGlobalTexture("_FluidSource", src); cmd.SetGlobalVector("_FluidBlurDirection", direction);
+                cmd.SetGlobalFloat("_FluidFirstFilter", first ? 1 : 0); SetGraphTarget(cmd, dst, false);
+                cmd.DrawProcedural(Matrix4x4.identity, owner.surfaceMaterial, 0, MeshTopology.Triangles, 3, 1);
+            }
+
+            void SetGraphTarget(UnsafeCommandBuffer cmd, TextureHandle target, bool clear)
+            {
+                cmd.DisableScissorRect(); cmd.SetRenderTarget(target);
+                cmd.SetViewport(new Rect(0, 0, width, height));
+                if (clear || cropped) cmd.ClearRenderTarget(false, true, Color.clear);
+                if (cropped) cmd.EnableScissorRect(new Rect(scissor.x, scissor.y, scissor.width, scissor.height));
+            }
+#endif
 
             void DrawWhitewater(CommandBuffer cmd, int shaderPass, bool drawFoam)
             {

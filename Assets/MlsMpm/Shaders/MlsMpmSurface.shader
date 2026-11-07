@@ -25,6 +25,8 @@ Shader "Hidden/WaterSplash/Continuous Surface"
         float _FluidRefraction;
         float _ContinuousFoam;
         float _DetailedWhitewater;
+        TEXTURECUBE(_VoyageReflection); SAMPLER(sampler_VoyageReflection);
+        float _VoyageReflectionStrength;
 
         float FoamNoise(float2 p)
         {
@@ -214,6 +216,13 @@ Shader "Hidden/WaterSplash/Continuous Surface"
             float3 environment = lerp(float3(0.13, 0.22, 0.3), float3(0.62, 0.79, 0.95),
                                      saturate(reflected.y * 0.7 + 0.3));
             float3 light = normalize(float3(-0.5, 0.75, 0.4));
+            // Scenes that publish a baked environment (the bottle voyage) use it and the real sun.
+            if (_VoyageReflectionStrength > 0)
+            {
+                environment = SAMPLE_TEXTURECUBE_LOD(_VoyageReflection, sampler_VoyageReflection, reflected, 1).rgb
+                    * _VoyageReflectionStrength;
+                light = _MainLightPosition.xyz;
+            }
             environment += 2.0 * pow(saturate(dot(reflected, light)), 48.0);
             float highlight = pow(saturate(dot(normalWS, normalize(light + viewWS))), 256.0);
             WaterOutput output;

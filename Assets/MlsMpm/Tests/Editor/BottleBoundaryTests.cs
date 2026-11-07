@@ -696,6 +696,40 @@ namespace WaterSplash.Tests
             boundary.ConfigureGridWindow();
         }
 
+        [TestCase(16384, 128)]
+        [TestCase(65536, 128)]
+        [TestCase(131072, 128)]
+        [TestCase(32768, 64)]
+        [TestCase(16387, 64)]
+        [TestCase(131072, 64)]
+        public void OptimizedTransfersMatchReferenceWithMovingHull(int count, int groupSize)
+        {
+            ConfigureP2gComparison(count);
+            fluid.groupSizeMode = groupSize == 64 ? MlsMpmFluid.GroupSizeMode.Fixed64 : MlsMpmFluid.GroupSizeMode.Fixed128;
+            var positions = boundary.CreateInitialFill(count, out float spacing);
+            var hull = new GameObject("Stencil equivalence hull");
+            try
+            {
+                fluid.sphereObstacle = hull.transform;
+                fluid.sphereRadius = .12f;
+                fluid.optimizeTransfers = false;
+                var reference = RunP2gMode(MlsMpmFluid.P2gMode.FusedPacked16, 0, 48, positions, spacing, hull.transform);
+                fluid.optimizeTransfers = true;
+                var optimized = RunP2gMode(MlsMpmFluid.P2gMode.FusedPacked16, 0, 48, positions, spacing, hull.transform);
+                Assert.That(reference.diagnostics[0], Is.Zero);
+                Assert.That(optimized.diagnostics, Is.EqualTo(reference.diagnostics));
+                for (int i = 0; i < count; i++)
+                {
+                    Assert.That(optimized.states[i].position, Is.EqualTo(reference.states[i].position), "position " + i);
+                    Assert.That(optimized.states[i].velocity, Is.EqualTo(reference.states[i].velocity), "velocity " + i);
+                    Assert.That(optimized.states[i].affineX, Is.EqualTo(reference.states[i].affineX), "affineX " + i);
+                    Assert.That(optimized.states[i].affineY, Is.EqualTo(reference.states[i].affineY), "affineY " + i);
+                    Assert.That(optimized.states[i].affineZ, Is.EqualTo(reference.states[i].affineZ), "affineZ " + i);
+                }
+            }
+            finally { UnityEngine.Object.DestroyImmediate(hull); }
+        }
+
         [Test]
         public void UncheckedP2gAtomicsMatchTwoPassExactly()
         {

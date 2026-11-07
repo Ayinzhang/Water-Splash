@@ -181,7 +181,7 @@ void TransferStress(uint id : SV_DispatchThreadID)
     StoreParticle(id, p);
 
     float compression = _PressureExponent == 3 ? ratio * ratio * ratio :
-        (_PressureExponent == 1 ? ratio : pow(ratio, _PressureExponent));
+        (_PressureExponent == 1 ? ratio : pow(abs(ratio), _PressureExponent));
     float pressure = _BulkModulus * max(compression - 1.0, 0.0);
     float3x3 c = float3x3(p.affineX.xyz, p.affineY.xyz, p.affineZ.xyz);
     float3x3 stress = _Viscosity * (c + transpose(c));
@@ -354,6 +354,8 @@ float4 WhitewaterFlow(float3 position)
 
 bool WhitewaterSurface(float3 position, float density, out float3 normal, out float gradientSize)
 {
+    normal = 0;
+    gradientSize = 0;
     int3 cell = (int3)round(position);
     float3 gradient = 0.5 * float3(
         WhitewaterMass(cell + int3(1,0,0)) - WhitewaterMass(cell - int3(1,0,0)),
