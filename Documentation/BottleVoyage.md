@@ -1,367 +1,64 @@
-# Horizontal Bottle Voyage
+# Bottle Voyage
 
-## Current mobile presentation (2026-11-07)
+Single-scene Unity 6 (URP 17, Vulkan) demo: a horizontal glass bottle filled with
+GPU MLS-MPM water, a draggable sailboat, Blender props and a CPU tag rope.
+Open `Assets/WaterSplash/Scenes/BottleVoyage.unity` and press Play.
 
-The scene starts at 64K. A snapping slider selects 16K / 32K / 64K / 128K;
-release commits one reset. Every tier retains the same water volume, 80 x 30 x 30
-grid, 60 Hz physics and eight substeps. The simulation remains entirely on the GPU.
+Drag the boat (hull or sail), flick the neck tag, Space pauses, R resets.
+The slider selects 16K / 32K / 64K / 128K particles (reset on release);
+the button toggles reconstructed water / raw particles without a reset.
 
-The bottle enables `optimizeTransfers`: packed grid sums use two contiguous
-32-bit words per node instead of two words plus two unused slots. Clear, P2G and
-grid decode agree on the layout. Transfer stencils are validated once before
-the 27-node loop, with base indices reused. The original kernels remain available
-for direct comparison; baseline scenes keep their settings. Allocation still
-has reference-layout capacity so runtime A/B switching and scratch benchmarks work.
+## Code map
 
-Adreno 840, Vulkan, 2608 x 1200, development APK, same scene/settings, six rotated
-benchmark rounds. GPU costs below are full solver substeps measured by subtracting
-a baseline GPU frame from a frame with 16 extra scratch substeps, then dividing
-by 16. They are not total rendered frame times.
+| File | Role |
+| --- | --- |
+| `Scripts/Voyage/BottleVoyage.cs` | Scene controller: input, boat probes, UI, frame pacing |
+| `Scripts/Voyage/BottleBoundary.cs` | Analytic bottle profile and initial fill |
+| `Scripts/Voyage/TagRope.cs` | CPU position-based cord + rigid tag |
+| `Scripts/Simulation/MlsMpmFluid.cs` | Solver driver: buffers, dispatches, diagnostics readback |
+| `Shaders/BottleMlsMpm.compute` | ClearGrid, Transfer (P2G), UpdateGrid, UpdateParticles (G2P), boundary cache, whitewater |
+| `Shaders/BottleWaterProbe.compute` | Five water-height probes for the boat (80-byte async readback) |
+| `Scripts/Rendering/MlsMpmSurfaceFeature.cs` | Screen-space water: depth/thickness, bilateral smoothing, normals, shading, foam |
+| `Editor/Art/BottleVoyageModels.cs` | Import settings for the Blender FBX and baked textures |
 
-| Particles | Reference ms/substep | Optimized ms/substep | Reduction | Observed optimized FPS |
-| --- | --- | --- | --- | --- |
-| 64K | 0.7076 | 0.6013 | 15.0% | 120.23 |
-| 128K | 1.3480 | 1.1878 | 11.9% | 68.25 |
+## Solver
 
-Both runs reported zero solver faults and simulated-time / wall-time ratios
-of approximately 1.0. These are short device samples, not sustained thermal
-or universal-device guarantees. 128K is an optional quality tier and does not
-hold 120 FPS on this phone. 64- versus 128-thread groups differed negligibly,
-so the bottle keeps Fixed128. Full loop unrolling and a shared hash for merging
-atomic writes were measured and rejected; their code is not retained.
+- Weakly compressible MLS-MPM, 60 Hz fixed tick, 8 substeps, retained backlog (no FPS cap, no time scaling).
+- Grid window 80 x 30 x 30 (cell 0.0533) around the bottle; static wall flags cached once per reset.
+- Every tier keeps the same water volume (鈮?.445 units鲁, fill height 0.73); spacing and radii scale with the cube root of per-particle volume.
+- Particles are stored as SoA float4 planes (`field * particleCount + id`).
+- Fused Packed16 P2G: one transfer pass, (mass, mx) and (my, mz) packed as signed 16-bit fixed point in two contiguous 32-bit atomics per node.
+  Stress uses the density ratio gathered by the previous G2P. 8-bit sums saturate and are not viable.
+- An invisible sphere follows the boat hull and sweeps at most a quarter cell per substep.
+- Flow-driven whitewater (8K pool) splits into foam and spray append buffers drawn indirectly.
+- Diagnostics: two uints (fault flags, min particle) read back asynchronously once per second; a fault stops the run.
 
-`Water Splash > Polish Bottle Voyage` (Edit Mode, Bottle Voyage open) builds the
-single presentation look: beveled tabletop with baked AO, fitted walnut saddles,
-cork, a baked reflection cubemap shared by glass/water/tabletop, an analytic bottle
-shadow, soft main-light shadows, a neutral post grade and FXAA. The tabletop and
-glass are generated in C#; the near-field props come from Blender (below).
-`BottleVoyage.reflection` / `bottleProfile` publish the shader
-globals; other scenes leave `_VoyageReflectionStrength` at 0 and keep their water.
+## Phone results (Adreno 840, Vulkan, 2608 x 1200, development APK)
 
-### Blender props
+| Particles | ms / substep | FPS |
+| --- | --- | --- |
+| 64K | 0.60 | 鈮?20 |
+| 128K | 1.19 | 鈮?8 |
 
-`Tools/Blender/voyage_models.py` rebuilds the cork, saddle cradles, neck cord,
-sailboat (hull, sails, cabin, rigging) and desk still life (brass compass, painted
-chart and postcard, pencil, scallops, pebbles, rope coils) headlessly:
+Simulated/wall time 鈮?1.0, zero faults. P2G history at 64K/6 substeps (ms/substep):
+two-pass 2.10 鈫?fused 1.22 鈫?Packed16 0.73 鈫?contiguous packed grid 0.60.
+Rejected after measurement: particle sorting (+0.58 ms per sort, no P2G gain), 64-thread groups (<1%),
+full 27-node unrolling and shared-memory atomic merging (slower), cropped surface targets (marginal).
+
+Analysis tools used: Android Profiler + `FrameTimingManager` GPU deltas (scratch-substep subtraction),
+adb logcat.
+
+## Art
+
+Props (cork, saddles, neck cord, sailboat, desk still life) are generated headlessly in Blender 4.2+ (tested 5.0.1):
 
     blender -b --factory-startup --python Tools/Blender/voyage_models.py -- [rope fittings boat desk]
 
-Each group is a real-size mesh in its Unity pivot space, Cycles/OptiX-baked into
-one atlas (albedo, tangent normal, mask R metal / G AO / A smoothness); the chart
-and postcard atlas (`Desk paper`) is painted with numpy, and ropes share the tiled
-`Cotton rope` texture. Output goes to `Art/Blender`; Polish assigns meshes by name
-with URP Lit materials (`Assets/WaterSplash/Editor/Art/BottleVoyageModels.cs`), so rebuild in Blender
-first, then run Polish. Output is `Assets/WaterSplash/Art/BottleVoyage/Blender`.
-Requires Blender 4.2+ (tested 5.0.1).
+Output goes to `Assets/WaterSplash/Art/BottleVoyage/Blender` (Cycles-baked atlas: albedo, normal, mask R metal / G AO / A smoothness).
+Meshes keep their names, so re-exporting updates the scene in place. The glass, tabletop and seabed are static mesh assets;
+the seabed is merged into one mesh per material.
 
-The neck tag hangs on a `TagRope`: a small position-based cord with a rigid tag,
-simulated on the CPU and colliding with the glass, cork and tabletop (no fluid
-coupling). Drag or flick the tag; it settles in about 1 s.
+## Android notes
 
-The demo uses the project-wide BottlePipeline in Graphics Settings; all quality
-levels inherit it. BottleVoyage does not switch or restore render pipelines.
-Android builds include only BottleVoyage and use the same configured pipeline.
-Particle tiers are selected with the slider; former Android launch extras,
-automatic device audits and reset timing logs have been removed.
-Historical evidence and APKs are under `build/VoyageUpgrade`.
-
-## Android landscape rendering (Unity 6000.6.8f1 / URP 17.6)
-
-Keep Player Settings > Vulkan > Pre Transform disabled. On the Adreno 840
-phone (Android 17, 2608 x 1200 landscape), enabling it clips scene rendering
-at x = 1200 while IMGUI still covers the screen. Two full APK builds with
-identical sources reproduced the issue with this setting enabled and restored
-the full scene with it disabled. The precise engine/driver interaction has not
-been isolated; this is the verified compatibility setting for this device.
-
-For a standalone installation, use a full Build APK. A Patch And Run APK may
-contain `lib-pram-shadow-files.so` instead of `libmain.so` and `libil2cpp.so`;
-it depends on separately deployed `pram-shadow-files` in the app's private
-storage. Launching before that deployment finishes can report
-`Failed to load 'libmain.so'`. The full APK was installed with replacement
-(preserving app data), and its native loader successfully loaded `libmain.so`.
-
-Open `BottleVoyage.unity`, then Play. Pick and drag the sailboat (hull or sail),
-Space to pause, R to reset. Dragging empty water no longer moves an invisible stirrer.
-
-The boat follows the pointer immediately on a fixed water-height drag plane,
-retaining the initial grab offset without a speed cap or fixed-tick input delay.
-Positions stay in the wide bottle body; vertical motion/tilt still follow actual
-water probes. Changing water height during a drag does not shift its horizontal
-pointer mapping.
-The existing analytic sphere now follows underneath the boat as a simplified hull
-collider, so moving the boat pushes water. The visible boat is immediate, while
-the water collider sweeps at up to 6 world units/second and at most a quarter grid
-cell per substep, rather than teleporting through the liquid on fast gestures.
-Energetic motion feeds the original flow-driven whitewater, not a painted trail
-or an always-on foam emitter. This is not a full rigid-body hull solve.
-Input over the on-screen controls is excluded from boat dragging.
-
-A slider selects **16K / 32K / 64K / 128K**, alongside one **Water > Particles / Particles > Water**
-toggle. Releasing the particle slider resets the run; the display toggle preserves the current
-simulation. Changing presets keeps the same
-compact grid, eight substeps, bottle geometry, fill height and represented total water
-volume. Per-particle volume is total volume divided by count; particle spacing and
-display/surface radius scale with the cube root of that volume. The 32K initial
-fill supplies the reference volume, rather than letting each lattice's rounding
-change the amount of water.
-
-Water probes resize their reduction buffers for each preset. A preset/reset request
-waits for any in-flight readback without blocking the CPU, and rapid selections
-coalesce to the latest requested preset. The particle mode draws individual opaque
-particle spheres rather than the reconstructed water surface; it omits the
-surface-only foam composite without disabling whitewater simulation.
-
-The bottle lies along world X. `BottleBoundary.Profile` defines the round inner wall,
-rounded heel, narrowing shoulder and capped neck. The glass mesh uses the same profile.
-The separate `BottleMlsMpm.compute` applies the boundary to grid velocities, liquid
-particle positions/velocities and whitewater. Wall contact removes outward normal
-velocity; particle projection keeps spray and liquid inside the bottle. The sphere
-hull collider is also constrained inside the curved wall.
-
-- Default particles: exactly 65,536; initial fill height: 0.73 world units.
-- Reference 32K spacing: approximately 0.03533 (previous upright scene: 0.07407).
-- Represented water volume: approximately 1.445 world units cubed, 10.85% of the old
-  upright fill. The particles are resampled inside the curved volume, not scaled visuals.
-- Grid: 80 x 30 x 30 stored cells with the original 0.05333 cell width and
-  unchanged world-space lattice (80-cubed reference domain). Empty Y/Z slabs are
-  omitted; the entire bottle, including spray space, remains covered.
-- Eight substeps per 1/60-second physics tick for every bottle particle tier.
-  Reset and particle-tier changes reapply this bottle-only policy.
-  Retained backlog; no frame-rate limit or simulation-time scaling.
-- High surface reconstruction in this presentation scene; device samples are listed above.
-- The small sailboat retains asynchronous water-height and tilt sampling.
-
-Baseline MLS and PB scene assets retain their original solver settings and AoS
-layout. Their shaders now share the same particle-access helpers as the bottle;
-the numerical algorithms are unchanged. The shared `MlsMpmFluid` has optional,
-nonserialized scene-local boundary and storage-window configuration, which is
-unset in those scenes. MLS no longer allocates the
-PB-only particle sorting buffers; switching to PB allocates them on reset.
-
-`Water Splash > Update Bottle Voyage to Horizontal` regenerates only the active bottle
-scene's presentation. Its generated meshes live under `BottleDemo/Art`.
-
-Validation: `BottleBoundaryTests` covers the initial fill, shoulder normals, gravity,
-GPU contact at the shoulder/heel/cork, spray containment, moving stirrer and reset.
-
-As of 2026-10-28.
-
-## Left-facing still life
-
-The current scene keeps the bottle proportions, with the mouth facing left-front,
-mirroring the original right-front composition. The camera's X position and initial
-boat/stirrer placement mirror with the bottle. `BottleBoundary.mouthFacesLeft` mirrors the X profile for the
-initial fill, CPU stirrer projection and GPU liquid/whitewater contacts, matching
-the mirrored glass rather than just flipping the artwork.
-
-`Water Splash > Detail Current Bottle Voyage` adds the authored still-life group
-once and refuses to replace it on subsequent calls. It preserves existing scene
-objects. The scene includes low seabed stones, shell gravel, ribbon eelgrass,
-scallops, a brass compass, inked chart and coiled rope on a wood-grained tabletop.
-Seabed decorations are visual only, not additional fluid colliders. Seaweed sway
-is a lightweight vertex animation, not simulated plant dynamics.
-
-Whitewater remains flow-driven GPU foam, not white dots painted onto the glass.
-The bottle scene retains the original emission parameters: 8 emission rate,
-1.2 m/s speed threshold, 4 deformation threshold, 2.5-second lifetime and 0.4
-radius scale, with an 8,192-seed bounded pool. Foam follows actual energetic
-surface motion; a completely still surface does not continuously manufacture foam.
-The 32K liquid particle count and baseline MLS scene are unchanged.
-
-## Detailed whitewater rendering
-
-The bottle renderer enables **Detailed Whitewater** on its `Turquoise water`
-renderer feature. Disable it to compare with the original rendering without
-resetting the simulation. Other renderer assets retain the original appearance.
-
-Foam seeds now carry two scales of antialiased cellular detail in their local
-surface footprint. Sparse foam has broken bubble rims and holes; overlapping
-seeds merge into denser foam. Bubble interiors open as seeds age. The seeded
-surface frame moves with each seed, rather than sampling static world-space
-noise. Flow stretches the footprint. This is rendering detail, not individually
-simulated bubbles or a new foam transport model.
-
-Spray uses smaller, velocity-stretched translucent droplets with restrained
-Fresnel/glints and soft intersections against opaque geometry and the water
-surface. Foam gains a second half-float accumulation channel; no history buffer,
-extra full-screen pass, additional whitewater particles or emission changes are
-introduced. The existing surface classifier and particle motion are unchanged.
-Mobile GPU cost has not been measured.
-
-## 64K optimization baseline
-
-The user-reported starting point is 64K at 14 FPS. This is not an Editor
-measurement and must not be replaced with desktop simulation-only timings.
-Keep particle count, six substeps, water volume, rendering quality and real-time
-tick duration fixed when comparing.
-
-`BottleBoundary.compactGrid` enables the grid storage window. Change it in Edit
-Mode or reset after changing it in Play Mode. Disabling restores 80 x 80 x 80
-storage for comparison. The compact window is aligned to four-cell boundaries
-and includes transfer/whitewater sampling padding around the full bottle profile,
-not just the initial water level. CPU/GPU particle coordinates and grid origin
-do not move; only the mapping of global cell indices to storage changes.
-The two primary grid buffers shrink from 15.625 MiB to 3.90625 MiB (75%).
-The compact path is MLS-only; PB and baseline solvers retain their cubic grids.
-
-The bottle stress pass writes only `velocity.w` (density ratio), rather than
-assigning the complete 80-byte particle back after changing one field.
-Per-particle diagnostics and overflow checks remain enabled. A group-reduced
-diagnostic experiment did not establish a local timing win and was not retained.
-No particle sorting, P2G fusion, precision reduction, time scaling or render-quality
-reduction is introduced. Particle storage remains AoS in this first optimization.
-
-Local comparison (RTX 5070 Ti Laptop, Editor, 64K/6, 120 warm-up ticks followed
-by nine GPU-fenced batches of 30 ticks): the original shader's two median tick
-times were 3.370/3.371 ms; retained changes measured 3.189/3.121 ms. These are
-simulation-only wall times, excluding rendering, not GPU timestamp timings or
-phone FPS. Individual batches fluctuate, and the gain is modest. After all 390
-ticks, all 64K particle states matched the original shader exactly. Raw timings
-are preserved in the session artifacts, not written into the repository.
-
-## Static walls, grouped SoA and screen-space cropping
-
-The bottle enables `MlsMpmFluid.cacheGridBoundary` and `useParticleSoA`. Change
-either option before initialization, or reset after changing it. Both can be
-disabled independently for a fixed-six-substep comparison.
-
-The wall cache stores the exact GPU-computed normal and signed distance for
-each grid cell, using one float4 per cell (1.953125 MiB for 80 x 40 x 40).
-It is rebuilt on reset or when the profile, bottle centre, axis or grid origin
-changes. Clearance is applied at use time, so changing particle spacing cannot
-leave a stale collision margin. Liquid and whitewater particle contacts still
-use the original analytic profile and iterative projection; no sampled SDF
-approximation is introduced for particles.
-
-Grouped SoA stores five contiguous float4 streams: position, velocity/density and
-the three affine columns. Total particle storage is still 80 bytes per particle.
-All streams share one allocation; shaders address either interleaved AoS or
-separated streams through one common helper. Surface/particle drawing, boat
-probes, whitewater sourcing and explicit diagnostic snapshots use the same
-layout. There is no per-frame AoS conversion or duplicate rendering buffer.
-CPU `ParticleState` snapshots remain available through `CaptureParticleStates`.
-PB sorting retains its separate AoS scratch buffer and uses the shared accessors.
-
-The bottle renderer leaves `MlsMpmSurfaceFeature.cropToFluidBounds` disabled.
-Full-target rendering avoids camera-scissor mismatches on mobile while the
-water surface path is validated there.
-
-Do not attribute the user's earlier 14-to-26 FPS improvement to any one change.
-That comparison also changed eight substeps to six, with variable fixed-tick
-catch-up per display frame. The existing Android capture has six substeps only
-and cannot isolate the two contributions. CPU-side dispatch markers, including
-those named "GPU", are not per-kernel GPU execution timings.
-
-Local follow-up (2026-10-29, RTX 5070 Ti Laptop/D3D11): all four combinations
-of cache/SoA, run in forward and reverse order at 64K/6 with the same moving-hull
-warm-up, retained identical particle states after 390 ticks. The simulation-only
-median wall times overlapped: both disabled 3.609--3.644 ms/tick, cache only
-3.694--3.711, SoA only 3.567--3.646, both enabled 3.555--3.661. This does **not**
-establish a stable desktop solver speedup, let alone a phone speedup.
-
-On one paused 1280 x 720 bottle frame with 123 foam and 53 spray seeds, the
-scissor covered 750 x 497 pixels (40.45% of the screen). Full-frame and cropped
-RGB readbacks were identical. GPU-fenced whole-scene render-request medians were
-1.034--1.075 ms full-frame versus 1.018--1.022 ms cropped; these include CPU
-submission, exclude simulation and are not GPU timestamp timings. The primary
-verified result is fewer rasterized water pixels without a visual change.
-
-## Phone diagnostic-reduction / 80 x 30 x 30 variant
-
-The bottle now enables `reduceDiagnosticAtomics` and `BottleBoundary.tightGrid`.
-Density and speed maxima are first accumulated in group-shared memory, then
-published with at most one global maximum per 128-thread group. Tail lanes and
-faulting lanes still reach both synchronization barriers. All non-finite,
-support, density, displacement and fixed-point overflow checks remain enabled;
-diagnostic maxima retain their original integer encoding. MLS transfer stages
-remain separate, without sorting, fusion or time scaling.
-
-The tight grid has 72,000 stored nodes, versus 128,000 for 80 x 40 x 40:
-43.75% fewer nodes. Accumulation/velocity/wall-cache storage together decreases
-from 5.859375 MiB to 3.295898 MiB. Grid origin, cell width, particle positions
-and represented water volume are unchanged.
-
-A 30-cell cross-section fits the nonzero transfer nodes for the existing
-16K/32K/64K/128K bottle presets because particles are projected inside the wall
-by their existing spacing-dependent clearance. The complete bottle, including
-spray space above the initial fill, is accounted for. Whitewater reads outside
-the storage window return zero, as those nodes also have zero mass in the
-larger grid. Invalid particle transfer support still raises a GPU fault.
-Configurations that cannot fit all transfer nodes (for example 256K at the
-current lattice) explicitly reject this tight mode instead of truncating water
-or silently changing resolution. Disable `tightGrid` to retain the previous
-80 x 40 x 40 comparison window.
-
-Bottle resets fix grouped diagnostic reduction and the tight grid on (the
-previous phone A configuration). Development builds display this configuration
-instead of optimization toggles, and each reset logs the active settings.
-Particle presets, rendering modes, fixed ticks and substep tiers are unchanged.
-
-The subsequent local-integer P2G and compact-RT experiment was reverted after
-the user reported below-20-FPS phone performance, including with its toggles
-disabled. The original P2G kernels, transfer arithmetic and full-sized
-scissored water targets are restored, not merely selected via feature flags.
-The earlier A capture averaged 15.06 ms/frame (66.4 FPS) at 64K/6; this is a
-historical measurement, not a new post-rollback phone result.
-
-## Per-kernel timing and workgroup autotune
-
-Every MLS stage is compiled at 128 threads (original names) and 64 threads
-(`*64`). `MlsMpmFluid.groupSizeMode` is `Fixed128` (default), `Fixed64` or
-`Auto`; the bottle uses `Fixed128`. Both sizes produce bit-identical states, peaks
-and counters (edit-mode tests).
-
-In `Auto` player builds the first launch per GPU name, driver, build and preset
-freezes the water for a few seconds. A scratch copy of the particles runs one
-baseline tick plus extra repetitions of one stage/size per block; the per-stage
-cost is the `FrameTimingManager` GPU-frame delta divided by the repetition
-count (CPU frame interval only if GPU timing is unavailable). 64 is chosen only
-when it is at least 3% faster, faults keep 128, and the result is cached in
-`PlayerPrefs`. The editor stays at 128. Frame Timing Stats is enabled in the
-player settings. Development builds have "Measure GPU kernels" for a 3-round
-re-measurement; each run logs a `MLS-MPM group calibration:` line.
-
-Adreno 840 (Vulkan, 64K, 80 x 30 x 30, 6 substeps), ms per substep:
-Clear 0.04, P2G mass 0.80, P2G stress 0.64, Grid 0.02, G2P 0.11 (1.60 total,
-about 9.6 ms per tick). 64 and 128 differed by under 1%, so all stages stayed
-at 128.
-
-## P2G variants and spatial sort
-
-`MlsMpmFluid.p2gMode` (runtime-switchable; component default `TwoPass`, the
-bottle scene uses `FusedPacked16`):
-
-- `TwoPass`: reference two-pass P2G with returning, overflow-checked atomics.
-- `TwoPassUnchecked`: same sums with non-returning atomics; per-increment bound
-  plus a negative-mass check in the grid pass. Bit-identical to `TwoPass`.
-- `Fused`: one P2G pass (mass + momentum + stress, 108 atomics instead of 189,
-  no density gather). Stress uses the density ratio that the previous G2P
-  gathered from grid mass (`velocity.w`), one substep older.
-- `FusedPacked16`: `Fused` with (mass, mx) and (my, mz) as two signed 16-bit
-  fixed-point sums per 32-bit atomic (54 atomics). Mass scale 512 (ratio up to
-  about 9; faults stop at 4), momentum scale 32 (per-node |sum m v| up to 1024,
-  about 148 cells/s at rest density). Intermediate wrap is harmless, but a
-  final overflow is not detectable; the CFL speed fault usually trips first.
-
-`mlsSortInterval` reorders particles into 4^3-cell blocks every N ticks.
-Integer atomics are order-independent, so sorting gives exactly the same
-water (permuted particle order).
-
-Development builds have "Bench P2G", which logs `MLS-MPM P2G benchmark:` with
-the ms per substep for every mode, both unsorted and directly after a sort.
-Adreno 840, 64K, 80 x 30 x 30, 6 substeps (historical baseline before the bottle
-was fixed at eight):
-
-| Mode | ms/substep | sorted | ms/tick |
-| --- | --- | --- | --- |
-| TwoPass | 2.10 | 2.16 | 12.6 |
-| Unchecked | 2.08 | 2.14 | 12.5 |
-| Fused | 1.22 | 1.28 | 7.3 |
-| Packed16 | 0.73 | 0.76 | 4.4 |
-
-One sort costs 0.58 ms and makes P2G slightly slower on this GPU, so sorting
-stays off. Over 240 moving-hull ticks at 64K, `Fused`/`FusedPacked16` show
-no faults, a peak density ratio 1.54 vs 1.44, and mean speed within 2%
-(edit-mode tests). Eight-bit sums are not viable: per-node momentum would
-saturate at about 4 cells/s.
+- Keep Player Settings > Vulkan > Pre Transform **disabled**: on the Adreno 840 it clips rendering at x = 1200.
+- Install a full Build APK; Patch And Run APKs depend on separately deployed shadow libraries.
