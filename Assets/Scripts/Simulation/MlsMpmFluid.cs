@@ -8,19 +8,17 @@ namespace WaterSplash
     {
         public const float FixedTick = 1f / 60;
         static readonly string[] KernelNames = {
-            "ClearGrid", "Transfer", "UpdateGrid", "UpdateParticles", "CacheBottleBoundary", "ClearWhitewater", "UpdateWhitewater" };
+            "ClearGrid", "Transfer", "UpdateGrid", "UpdateParticles", "ClearWhitewater", "UpdateWhitewater" };
+        const int CellCount = 80 * 30 * 30;
 
         public ComputeShader simulationShader;
-        public Material particleMaterial;
         public int particleCount = 65536;
-        public int gridResolution = 80;
-        public float domainSize = 4;
         public int substeps = 8;
         public float soundSpeed = 6;
         public float pressureExponent = 3;
         public float viscosity = .15f;
         public Vector3 gravity = new Vector3(0, -9.81f, 0);
-        public Transform sphereObstacle;
+        public Vector3 SpherePosition { get; set; }
         public float sphereRadius = .12f;
         public bool renderSurface = true;
         public float surfaceRadiusScale = .95f;
@@ -35,8 +33,10 @@ namespace WaterSplash
         public static MlsMpmFluid Active { get; private set; }
         public string Error { get; private set; }
         public bool IsInitialized => Particles != null;
-        public float CellSize => domainSize / (gridResolution - 5);
-        public Vector3 GridOrigin => transform.position - Vector3.one * (2 * CellSize);
+        public float CellSize => 4f / 75;
+        public Vector3 GridOrigin => new Vector3(-2, 0, -2) - Vector3.one * (2 * CellSize);
+        public float DisplayRadius { get; private set; }
+        public ComputeShader Solver => solver;
         public float RestDensity { get; private set; }
         public float SurfaceParticleRadius => CellSize * surfaceRadiusScale / Mathf.Pow(RestDensity, 1f / 3);
         public float WhitewaterRadius => CellSize * whitewaterRadiusScale / Mathf.Pow(RestDensity, 1f / 3);
@@ -51,13 +51,12 @@ namespace WaterSplash
         ComputeShader solver;
         ComputeBuffer accumulation, grid, gridBoundary, diagnostics;
         CommandBuffer commands;
-        MaterialPropertyBlock drawProperties;
         Vector3 previousSphere;
-        float displayRadius, nextReadback;
-        int cellCount, whitewaterStep, generation;
+        float nextReadback;
+        int whitewaterStep, generation;
         bool readbackPending;
 
-        void OnEnable() { Active = this; drawProperties = new MaterialPropertyBlock(); }
+        void OnEnable() => Active = this;
         void OnDisable() { if (Active == this) Active = null; Release(); }
 
         public void Initialize(BottleBoundary bottle)
@@ -65,26 +64,14 @@ namespace WaterSplash
             Release();
             Error = null;
             float h = CellSize;
-            Vector3[] fill = bottle.CreateInitialFill(particleCount, out float spacing);
-            RestDensity = Mathf.Pow(h / spacing, 3);
-            displayRadius = spacing * .34f;
-            // Tight storage window: full X span, 30 x 30 cells around the bottle axis.
             Vector3 center = (bottle.center - GridOrigin) / h;
-            var offset = new Vector3Int(0, Mathf.CeilToInt(center.y - 15), Mathf.CeilToInt(center.z - 15));
-            var size = new Vector3Int(gridResolution, 30, 30);
-            cellCount = size.x * size.y * size.z;
-
-            var data = new Vector4[particleCount * 5];
-            for (int i = 0; i < particleCount; i++)
-            {
-                Vector3 p = (fill[i] - GridOrigin) / h;
-                data[i] = new Vector4(p.x, p.y, p.z, 1);
-            }
             Particles = new ComputeBuffer(particleCount * 5, 16);
-            Particles.SetData(data);
-            accumulation = new ComputeBuffer(cellCount * 2, 4);
-            grid = new ComputeBuffer(cellCount, 16);
-            gridBoundary = new ComputeBuffer(cellCount, 16);
+            accumulation = new ComputeBuffer(CellCount * 2, 4);
+            grid = new ComputeBuffer(CellCount, 16);
+            gridBoundary = new ComputeBuffer(CellCount, 16);
+            float spacing = bottle.LoadInitialState(particleCount, Particles, gridBoundary);
+            RestDensity = Mathf.Pow(h / spacing, 3);
+            DisplayRadius = spacing * .34f;
             diagnostics = new ComputeBuffer(2, 4);
             diagnostics.SetData(new[] { 0u, uint.MaxValue });
             Whitewater = new ComputeBuffer(whitewaterCapacity, 48);
@@ -109,12 +96,12 @@ namespace WaterSplash
                 solver.SetBuffer(kernel, "_SprayIndices", SprayIndices);
             }
             float sound = soundSpeed / h;
-            solver.SetInts("_GridSize", size.x, size.y, size.z);
-            solver.SetInts("_GridOffset", offset.x, offset.y, offset.z);
+            solver.SetInts("_GridSize", 80, 30, 30);
+            solver.SetInts("_GridOffset", 0, 5, 25);
             solver.SetInt("_ParticlePlaneStride", particleCount);
             solver.SetInt("_ParticleCount", particleCount);
-            solver.SetInt("_Resolution", gridResolution);
-            solver.SetInt("_CellCount", cellCount);
+            solver.SetInt("_Resolution", 80);
+            solver.SetInt("_CellCount", CellCount);
             solver.SetFloat("_Dt", FixedTick / substeps);
             solver.SetFloat("_RestDensity", RestDensity);
             solver.SetFloat("_BulkModulus", RestDensity * sound * sound / pressureExponent);
@@ -137,12 +124,11 @@ namespace WaterSplash
             solver.SetVector("_BottleCenter", center);
             solver.SetFloat("_BottleClearance", .75f * spacing / h);
             solver.SetFloat("_BottleAxisSign", bottle.AxisSign);
-            solver.Dispatch(kernels[0], (cellCount + 127) / 128, 1, 1);
-            solver.Dispatch(kernels[4], (cellCount + 127) / 128, 1, 1);
-            solver.Dispatch(kernels[5], (whitewaterCapacity + 127) / 128, 1, 1);
+            solver.Dispatch(kernels[0], (CellCount + 127) / 128, 1, 1);
+            solver.Dispatch(kernels[4], (whitewaterCapacity + 127) / 128, 1, 1);
 
             commands = new CommandBuffer { name = "MLS-MPM" };
-            previousSphere = sphereObstacle.position;
+            previousSphere = SpherePosition;
             whitewaterStep = 0;
             nextReadback = Time.realtimeSinceStartup + .5f;
         }
@@ -151,11 +137,11 @@ namespace WaterSplash
         {
             if (Error != null) return;
             float h = CellSize;
-            Vector3 sphereStart = (previousSphere - GridOrigin) / h, sphereEnd = (sphereObstacle.position - GridOrigin) / h;
+            Vector3 sphereStart = (previousSphere - GridOrigin) / h, sphereEnd = (SpherePosition - GridOrigin) / h;
             commands.Clear();
-            commands.SetComputeVectorParam(solver, "_SphereVelocity", (sphereObstacle.position - previousSphere) / (FixedTick * h));
-            previousSphere = sphereObstacle.position;
-            int particleGroups = (particleCount + 127) / 128, cellGroups = (cellCount + 127) / 128;
+            commands.SetComputeVectorParam(solver, "_SphereVelocity", (SpherePosition - previousSphere) / (FixedTick * h));
+            previousSphere = SpherePosition;
+            int particleGroups = (particleCount + 127) / 128, cellGroups = (CellCount + 127) / 128;
             for (int step = 0; step < substeps; step++)
             {
                 // Sweep the collider through the tick instead of teleporting it.
@@ -171,7 +157,7 @@ namespace WaterSplash
                 commands.SetComputeIntParam(solver, "_WhitewaterStep", whitewaterStep++);
                 commands.SetBufferCounterValue(FoamIndices, 0);
                 commands.SetBufferCounterValue(SprayIndices, 0);
-                commands.DispatchCompute(solver, kernels[6], (whitewaterCapacity + 127) / 128, 1, 1);
+                commands.DispatchCompute(solver, kernels[5], (whitewaterCapacity + 127) / 128, 1, 1);
                 commands.CopyCounterValue(FoamIndices, FoamArguments, 4);
                 commands.CopyCounterValue(SprayIndices, SprayArguments, 4);
             }
@@ -188,25 +174,12 @@ namespace WaterSplash
             {
                 if (this == null || generation != requestGeneration) return;
                 readbackPending = false;
-                if (request.hasError) return;
+                if (request.hasError) { Error = "GPU diagnostics readback failed."; return; }
                 var values = request.GetData<uint>();
                 if (values[0] != 0)
                     Error = "GPU fault " + values[0] + " at particle " + values[1] +
                         " (1 non-finite, 2 overflow, 4 support, 8 density, 16 displacement, 32 whitewater).";
             });
-        }
-
-        void LateUpdate()
-        {
-            if (!IsInitialized || renderSurface) return;
-            drawProperties.SetBuffer("_Particles", Particles);
-            drawProperties.SetInt("_ParticlePlaneStride", particleCount);
-            drawProperties.SetVector("_Origin", GridOrigin);
-            drawProperties.SetFloat("_CellSize", CellSize);
-            drawProperties.SetFloat("_Radius", displayRadius);
-            var bounds = new Bounds(transform.position + Vector3.one * (domainSize * .5f), Vector3.one * (domainSize + CellSize));
-            Graphics.DrawProcedural(particleMaterial, bounds, MeshTopology.Triangles, 6, particleCount,
-                null, drawProperties, ShadowCastingMode.Off, false, gameObject.layer);
         }
 
         void Release()
@@ -216,6 +189,7 @@ namespace WaterSplash
             Particles?.Release(); accumulation?.Release(); grid?.Release(); gridBoundary?.Release(); diagnostics?.Release();
             Whitewater?.Release(); FoamIndices?.Release(); SprayIndices?.Release(); FoamArguments?.Release(); SprayArguments?.Release();
             commands?.Release();
+            commands = null;
             Particles = null;
             if (solver != null) Destroy(solver);
         }

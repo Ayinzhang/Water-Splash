@@ -12,8 +12,7 @@ namespace WaterSplash
     {
         const int SmoothingIterations = 4;
 
-        public Shader particleShader;
-        public Shader surfaceShader;
+        public Shader waterShader;
         [ColorUsage(false)] public Color waterColor = new Color(.01f, .15f, .32f);
         public Vector3 absorption = new Vector3(2.5f, .7f, .3f);
         [Range(0, .2f)] public float refraction = .08f;
@@ -21,16 +20,14 @@ namespace WaterSplash
         public bool continuousFoam = true;
         public bool detailedWhitewater = true;
 
-        Material particleMaterial, surfaceMaterial;
+        Material waterMaterial;
         SurfacePass pass;
 
         public override void Create()
         {
             pass?.Dispose();
-            CoreUtils.Destroy(particleMaterial);
-            CoreUtils.Destroy(surfaceMaterial);
-            particleMaterial = CoreUtils.CreateEngineMaterial(particleShader);
-            surfaceMaterial = CoreUtils.CreateEngineMaterial(surfaceShader);
+            CoreUtils.Destroy(waterMaterial);
+            waterMaterial = CoreUtils.CreateEngineMaterial(waterShader);
             pass = new SurfacePass(this) { renderPassEvent = RenderPassEvent.BeforeRenderingTransparents };
         }
 
@@ -38,7 +35,7 @@ namespace WaterSplash
         {
             MlsMpmFluid fluid = MlsMpmFluid.Active;
             if (renderingData.cameraData.camera.cameraType != CameraType.Game || renderingData.cameraData.renderType != CameraRenderType.Base ||
-                fluid == null || !fluid.IsInitialized || !fluid.renderSurface) return;
+                fluid == null || !fluid.IsInitialized) return;
             pass.ConfigureInput(ScriptableRenderPassInput.Depth | ScriptableRenderPassInput.Color);
             renderer.EnqueuePass(pass);
         }
@@ -46,8 +43,7 @@ namespace WaterSplash
         protected override void Dispose(bool disposing)
         {
             pass?.Dispose();
-            CoreUtils.Destroy(particleMaterial);
-            CoreUtils.Destroy(surfaceMaterial);
+            CoreUtils.Destroy(waterMaterial);
         }
 
         sealed class SurfacePass : ScriptableRenderPass
@@ -75,6 +71,17 @@ namespace WaterSplash
                 fluid = MlsMpmFluid.Active;
                 var desc = cameraData.cameraTargetDescriptor;
                 width = desc.width; height = desc.height;
+                if (!fluid.renderSurface)
+                {
+                    using var particles = graph.AddUnsafePass<PassData>("MLS-MPM Particles", out var p, profiler);
+                    p.pass = this; p.camera = cameraData.camera;
+                    p.color = resources.activeColorTexture; p.depth = resources.activeDepthTexture;
+                    particles.UseTexture(p.color, AccessFlags.ReadWrite);
+                    particles.UseTexture(p.depth, AccessFlags.ReadWrite);
+                    particles.AllowPassCulling(false);
+                    particles.SetRenderFunc(static (PassData d, UnsafeGraphContext c) => d.pass.Execute(d, c.cmd));
+                    return;
+                }
                 desc.msaaSamples = 1; desc.bindMS = false; desc.useMipMap = false; desc.autoGenerateMips = false;
                 desc.useDynamicScale = false; desc.depthBufferBits = 0;
                 Allocate(ref rawDepth, desc, GraphicsFormat.R32_SFloat, FilterMode.Point, "_MpmRawDepth");
@@ -110,6 +117,13 @@ namespace WaterSplash
 
             void Execute(PassData d, UnsafeCommandBuffer cmd)
             {
+                if (!fluid.renderSurface)
+                {
+                    cmd.SetRenderTarget(d.color, d.depth);
+                    cmd.SetViewport(d.camera.pixelRect);
+                    DrawParticles(cmd, 7);
+                    return;
+                }
                 float radius = fluid.SurfaceParticleRadius;
                 Matrix4x4 projection = GL.GetGPUProjectionMatrix(d.camera.projectionMatrix, true);
                 cmd.SetGlobalVector("_FluidBufferSize", new Vector4(width, height, 1f / width, 1f / height));
@@ -140,14 +154,14 @@ namespace WaterSplash
                 }
                 cmd.SetGlobalTexture("_FluidDepth", source);
                 SetTarget(cmd, d.normals, false);
-                cmd.DrawProcedural(Matrix4x4.identity, owner.surfaceMaterial, 2, MeshTopology.Triangles, 3, 1);
+                cmd.DrawProcedural(Matrix4x4.identity, owner.waterMaterial, 6, MeshTopology.Triangles, 3, 1);
                 SetTarget(cmd, d.foam, true);
                 DrawWhitewater(cmd, 2, true);
                 cmd.SetGlobalTexture("_FluidFoam", d.foam);
                 cmd.SetGlobalTexture("_FluidNormals", d.normals);
                 cmd.SetRenderTarget(d.color, d.depth);
                 cmd.SetViewport(d.camera.pixelRect);
-                cmd.DrawProcedural(Matrix4x4.identity, owner.surfaceMaterial, 1, MeshTopology.Triangles, 3, 1);
+                cmd.DrawProcedural(Matrix4x4.identity, owner.waterMaterial, 5, MeshTopology.Triangles, 3, 1);
                 DrawWhitewater(cmd, 3, false);
             }
 
@@ -159,10 +173,10 @@ namespace WaterSplash
                 properties.SetInt("_ParticlePlaneStride", fluid.particleCount);
                 properties.SetVector("_Origin", fluid.GridOrigin);
                 properties.SetFloat("_CellSize", fluid.CellSize);
-                properties.SetFloat("_Radius", fluid.SurfaceParticleRadius);
+                properties.SetFloat("_Radius", shaderPass == 7 ? fluid.DisplayRadius : fluid.SurfaceParticleRadius);
                 // Correct the mean overlap of the enlarged rendering spheres at rest density.
                 properties.SetFloat("_ThicknessScale", 3f / (4 * Mathf.PI * scale * scale * scale));
-                cmd.DrawProcedural(Matrix4x4.identity, owner.particleMaterial, shaderPass, MeshTopology.Triangles, 6, fluid.particleCount, properties);
+                cmd.DrawProcedural(Matrix4x4.identity, owner.waterMaterial, shaderPass, MeshTopology.Triangles, 6, fluid.particleCount, properties);
             }
 
             void DrawWhitewater(UnsafeCommandBuffer cmd, int shaderPass, bool foamPass)
@@ -175,7 +189,7 @@ namespace WaterSplash
                 properties.SetFloat("_CellSize", fluid.CellSize);
                 properties.SetFloat("_WhitewaterRadius", fluid.WhitewaterRadius);
                 properties.SetFloat("_WhitewaterDepthTolerance", fluid.SurfaceParticleRadius * 2.5f);
-                cmd.DrawProceduralIndirect(Matrix4x4.identity, owner.particleMaterial, shaderPass, MeshTopology.Triangles,
+                cmd.DrawProceduralIndirect(Matrix4x4.identity, owner.waterMaterial, shaderPass, MeshTopology.Triangles,
                     foamPass ? fluid.FoamArguments : fluid.SprayArguments, 0, properties);
             }
 
@@ -185,7 +199,7 @@ namespace WaterSplash
                 cmd.SetGlobalVector("_FluidBlurDirection", direction);
                 cmd.SetGlobalFloat("_FluidFirstFilter", first ? 1 : 0);
                 SetTarget(cmd, target, false);
-                cmd.DrawProcedural(Matrix4x4.identity, owner.surfaceMaterial, 0, MeshTopology.Triangles, 3, 1);
+                cmd.DrawProcedural(Matrix4x4.identity, owner.waterMaterial, 4, MeshTopology.Triangles, 3, 1);
             }
 
             static void SetTarget(UnsafeCommandBuffer cmd, TextureHandle target, bool clear)

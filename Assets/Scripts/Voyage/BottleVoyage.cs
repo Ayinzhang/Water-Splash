@@ -1,6 +1,9 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.Rendering;
+using UnityEngine.UI;
 
 namespace WaterSplash
 {
@@ -10,26 +13,29 @@ namespace WaterSplash
         public MlsMpmFluid fluid;
         public Transform boat;
         public Camera waterCamera;
-        public ComputeShader waterProbe;
         public BottleBoundary boundary;
         public TagRope tagRope;
         public Cubemap reflection;
         public Texture2D bottleProfile;
-        public Color captionColor = new Color(.26f, .22f, .25f);
+        public RectTransform safeArea;
+        public GraphicRaycaster uiRaycaster;
+        public Slider particleSlider;
+        public Text countLabel, statusLabel, footerLabel, modeLabel;
         public bool IsDraggingBoat => dragging;
 
         readonly Vector4[] probePositions = new Vector4[5], samples = new Vector4[5];
+        readonly List<RaycastResult> uiHits = new List<RaycastResult>();
         ComputeShader probe;
         ComputeBuffer partials, results;
         AsyncGPUReadbackRequest pendingRequest;
         Quaternion heading;
         Vector3 initialBoatPosition, desiredPosition, desiredNormal = Vector3.up, boatTarget, dragOffset;
         Renderer[] boatRenderers;
-        float nextProbe, meanFrame, dragPlaneHeight, backlog, particleSlider;
+        float nextProbe, meanFrame, dragPlaneHeight, backlog, nextStatus;
         int collectKernel, reduceKernel, blocks, generation, requestedCount;
-        bool pending, dragging, skipDelta, resetRequested, paused, sliderDragging;
+        bool pending, dragging, skipDelta, resetRequested, paused, suspended;
         string error;
-        GUIStyle titleStyle, subtitleStyle, footStyle;
+        Rect lastSafeArea;
 
         void Awake()
         {
@@ -43,14 +49,16 @@ namespace WaterSplash
             heading = Quaternion.Euler(0, boat.eulerAngles.y, 0);
             initialBoatPosition = boat.position;
             boatRenderers = boat.GetComponentsInChildren<Renderer>();
-            probe = Instantiate(waterProbe);
-            collectKernel = probe.FindKernel("Collect");
-            reduceKernel = probe.FindKernel("Reduce");
             results = new ComputeBuffer(5, 16);
-            probe.SetBuffer(reduceKernel, "_Samples", results);
-            probe.SetFloat("_Radius", .23f);
             requestedCount = fluid.particleCount;
-            particleSlider = SliderFor(requestedCount);
+            particleSlider.SetValueWithoutNotify(SliderFor(requestedCount));
+            PreviewParticleCount(particleSlider.value);
+            statusLabel.gameObject.SetActive(Debug.isDebugBuild);
+            footerLabel.text = Application.isMobilePlatform ?
+                "DRAG THE SAILBOAT     /     SLIDE TO SET PARTICLES" :
+                "DRAG THE SAILBOAT     /     SPACE TO PAUSE     /     R TO RESET";
+            UpdateSafeArea();
+            UpdateModeLabel();
         }
 
         void Start() => ResetWater();
@@ -66,18 +74,23 @@ namespace WaterSplash
             boat.SetPositionAndRotation(initialBoatPosition, heading);
             desiredPosition = boatTarget = initialBoatPosition;
             desiredNormal = Vector3.up;
-            fluid.sphereObstacle.position = HullCenter();
+            fluid.SpherePosition = HullCenter();
             fluid.Initialize(boundary);
+            probe = fluid.Solver;
+            collectKernel = probe.FindKernel("Collect");
+            reduceKernel = probe.FindKernel("Reduce");
+            probe.SetBuffer(reduceKernel, "_Samples", results);
+            probe.SetFloat("_ProbeRadius", .23f);
             int nextBlocks = (fluid.particleCount + 127) / 128;
             if (blocks != nextBlocks)
             {
                 partials?.Release();
                 blocks = nextBlocks;
                 partials = new ComputeBuffer(blocks * 5, 16);
-                probe.SetBuffer(collectKernel, "_Partials", partials);
-                probe.SetBuffer(reduceKernel, "_Partials", partials);
-                probe.SetInt("_BlockCount", blocks);
             }
+            probe.SetBuffer(collectKernel, "_Partials", partials);
+            probe.SetBuffer(reduceKernel, "_Partials", partials);
+            probe.SetInt("_BlockCount", blocks);
             Array.Clear(samples, 0, 5);
             nextProbe = Time.unscaledTime;
             backlog = 0;
@@ -87,14 +100,51 @@ namespace WaterSplash
         static int CountFor(float slider) => 16384 << Mathf.Clamp(Mathf.RoundToInt(slider), 0, 3);
         static float SliderFor(int count) => Mathf.Log(count / 16384f, 2);
 
+        public void PreviewParticleCount(float value)
+        {
+            countLabel.text = CountFor(value) / 1024 + "K";
+            if (!Input.GetMouseButton(0)) CommitParticleCount();
+        }
+
+        public void CommitParticleCount()
+        {
+            particleSlider.SetValueWithoutNotify(Mathf.Round(particleSlider.value));
+            int count = CountFor(particleSlider.value);
+            if (count == requestedCount) return;
+            requestedCount = count;
+            resetRequested = true;
+            dragging = false;
+        }
+
+        public void ToggleWater()
+        {
+            fluid.renderSurface = !fluid.renderSurface;
+            UpdateModeLabel();
+        }
+
+        void UpdateModeLabel() => modeLabel.text = fluid.renderSurface ? "Water  >  Particles" : "Particles  >  Water";
+
+        void UpdateSafeArea()
+        {
+            lastSafeArea = Screen.safeArea;
+            safeArea.anchorMin = new Vector2(lastSafeArea.xMin / Screen.width, lastSafeArea.yMin / Screen.height);
+            safeArea.anchorMax = new Vector2(lastSafeArea.xMax / Screen.width, lastSafeArea.yMax / Screen.height);
+        }
+
         void Update()
         {
+            if (Screen.safeArea != lastSafeArea) UpdateSafeArea();
             if (error != null) return;
             if (resetRequested && !pending || Input.GetKeyDown(KeyCode.R)) ResetWater();
             if (Input.GetKeyDown(KeyCode.Space)) paused = !paused;
             if (fluid.Error != null) { Fail(fluid.Error); return; }
             meanFrame = Mathf.Lerp(meanFrame, Time.unscaledDeltaTime, .03f);
-            if (paused) { skipDelta = true; dragging = false; return; }
+            if (Debug.isDebugBuild && Time.unscaledTime >= nextStatus)
+            {
+                nextStatus = Time.unscaledTime + .25f;
+                statusLabel.text = $"{fluid.particleCount / 1024}K particles | {1 / Mathf.Max(meanFrame, 1e-4f):F0} FPS | physics backlog {backlog:F3}s";
+            }
+            if (paused || suspended) { skipDelta = true; dragging = false; return; }
             UpdatePointer();
             if (skipDelta) { skipDelta = false; return; }
             backlog += Time.unscaledDeltaTime;
@@ -104,7 +154,7 @@ namespace WaterSplash
                 AdvanceBoat(MlsMpmFluid.FixedTick);
                 // The water collider sweeps at most a quarter cell per substep, even when the visible boat jumps.
                 float speed = Mathf.Min(6, .25f * fluid.CellSize * fluid.substeps / MlsMpmFluid.FixedTick);
-                fluid.sphereObstacle.position = Vector3.MoveTowards(fluid.sphereObstacle.position, HullCenter(), speed * MlsMpmFluid.FixedTick);
+                fluid.SpherePosition = Vector3.MoveTowards(fluid.SpherePosition, HullCenter(), speed * MlsMpmFluid.FixedTick);
                 fluid.StepSimulation();
                 backlog -= MlsMpmFluid.FixedTick;
             }
@@ -134,7 +184,7 @@ namespace WaterSplash
 
         void LateUpdate()
         {
-            if (error != null || pending || resetRequested || paused || Time.unscaledTime < nextProbe) return;
+            if (error != null || pending || resetRequested || paused || suspended || Time.unscaledTime < nextProbe) return;
             nextProbe = Time.unscaledTime + .1f;
             Vector3 center = boat.position;
             Vector3 front = heading * new Vector3(0, 0, .45f * boat.localScale.z);
@@ -192,7 +242,7 @@ namespace WaterSplash
         void BeginBoatDrag(Vector2 point)
         {
             if (resetRequested || IsPointerOnControls(point)) return;
-            float padding = 18 * UiScale();
+            float padding = 18 * uiRaycaster.GetComponent<Canvas>().scaleFactor;
             foreach (Renderer renderer in boatRenderers)
             {
                 Bounds bounds = renderer.bounds;
@@ -223,21 +273,27 @@ namespace WaterSplash
 
         public bool IsPointerOnControls(Vector2 point)
         {
-            float scale = UiScale();
-            return ControlsRect(scale).Contains(new Vector2(point.x / scale, (Screen.height - point.y) / scale));
+            uiHits.Clear();
+            uiRaycaster.Raycast(new PointerEventData(EventSystem.current) { position = point }, uiHits);
+            return uiHits.Count > 0;
         }
 
         void OnApplicationFocus(bool focus)
         {
             if (focus) return;
             skipDelta = true;
-            dragging = sliderDragging = false;
-            particleSlider = SliderFor(requestedCount);
+            dragging = false;
+            particleSlider.SetValueWithoutNotify(SliderFor(requestedCount));
+            countLabel.text = requestedCount / 1024 + "K";
         }
+
+        void OnApplicationPause(bool value) { suspended = value; skipDelta = true; }
 
         void Fail(string message)
         {
             error = message;
+            footerLabel.text = message;
+            particleSlider.interactable = false;
             Debug.LogError("Bottle Voyage: " + message, this);
         }
 
@@ -247,58 +303,6 @@ namespace WaterSplash
             if (pending) pendingRequest.WaitForCompletion();
             partials?.Release();
             results?.Release();
-            Destroy(probe);
-        }
-
-        static float UiScale() => Mathf.Max(.5f, Mathf.Min(Screen.width / 1280f, Screen.height / 800f));
-
-        static Rect ControlsRect(float scale)
-        {
-            Rect safe = Screen.safeArea;
-            return new Rect(safe.xMax / scale - 610, (Screen.height - safe.yMin) / scale - 88, 574, 58);
-        }
-
-        void OnGUI()
-        {
-            if (titleStyle == null)
-            {
-                Color dim = Color.Lerp(captionColor, Color.gray, .25f);
-                titleStyle = new GUIStyle(GUI.skin.label) { fontSize = 25 };
-                subtitleStyle = new GUIStyle(GUI.skin.label) { fontSize = 14 };
-                footStyle = new GUIStyle(GUI.skin.label) { fontSize = 11 };
-                titleStyle.normal.textColor = captionColor;
-                subtitleStyle.normal.textColor = footStyle.normal.textColor = dim;
-            }
-            float scale = UiScale();
-            GUI.matrix = Matrix4x4.Scale(new Vector3(scale, scale, 1));
-            Rect safe = Screen.safeArea;
-            float x = safe.x / scale + 36, top = (Screen.height - safe.yMax) / scale + 30, bottom = (Screen.height - safe.yMin) / scale - 38;
-            GUI.Label(new Rect(x, top, 640, 40), "T I D E   I N   A   B O T T L E", titleStyle);
-            GUI.Label(new Rect(x + 2, top + 39, 600, 28), "a little ocean, a long way home.", subtitleStyle);
-            GUI.Label(new Rect(x, bottom, 750, 30), error ?? (Application.isMobilePlatform ?
-                "DRAG THE SAILBOAT     /     SLIDE TO SET PARTICLES" :
-                "DRAG THE SAILBOAT     /     SPACE TO PAUSE     /     R TO RESET"), footStyle);
-            if (Debug.isDebugBuild)
-                GUI.Label(new Rect(x, bottom - 22, 750, 25), $"{fluid.particleCount / 1024}K particles | {1 / Mathf.Max(meanFrame, 1e-4f):F0} FPS | physics backlog {backlog:F3}s", footStyle);
-            if (error != null) return;
-            Rect controls = ControlsRect(scale);
-            float bx = controls.x, by = controls.y, previous = particleSlider;
-            particleSlider = GUI.HorizontalSlider(new Rect(bx + 6, by + 9, 278, 28), particleSlider, 0, 3);
-            if (previous != particleSlider) sliderDragging = true;
-            GUI.Label(new Rect(bx + 304, by + 5, 66, 30), CountFor(particleSlider) / 1024 + "K", subtitleStyle);
-            GUI.Label(new Rect(bx + 3, by + 32, 48, 20), "16K", footStyle);
-            GUI.Label(new Rect(bx + 88, by + 32, 48, 20), "32K", footStyle);
-            GUI.Label(new Rect(bx + 177, by + 32, 48, 20), "64K", footStyle);
-            GUI.Label(new Rect(bx + 259, by + 32, 48, 20), "128K", footStyle);
-            if (sliderDragging && Event.current.rawType == EventType.MouseUp)
-            {
-                sliderDragging = false;
-                particleSlider = Mathf.Round(particleSlider);
-                int count = CountFor(particleSlider);
-                if (count != requestedCount) { requestedCount = count; resetRequested = true; dragging = false; }
-            }
-            if (GUI.Button(new Rect(bx + 383, by + 5, 190, 32), fluid.renderSurface ? "Water  >  Particles" : "Particles  >  Water"))
-                fluid.renderSurface = !fluid.renderSurface;
         }
     }
 }

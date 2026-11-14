@@ -68,12 +68,10 @@ MonoBehaviour:
   m_Name: Turquoise water
   m_EditorClassIdentifier: 
   m_Active: 1
-  particleShader: {fileID: 4800000, guid: a46d094839621c247ab1be7b85eb4453, type: 3}
-  surfaceShader: {fileID: 4800000, guid: 7895c1968d5edec4298851ec20cd4e61, type: 3}
+  waterShader: {fileID: 4800000, guid: a46d094839621c247ab1be7b85eb4453, type: 3}
   waterColor: {r: 0.018, g: 0.29, b: 0.3, a: 1}
   absorption: {x: 1.45, y: 0.38, z: 0.23}
   refraction: 0.045
   surfaceSmoothing: 2.5
   continuousFoam: 1
   detailedWhitewater: 1
-  cropToFluidBounds: 0

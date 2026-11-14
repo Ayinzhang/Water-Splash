@@ -2,7 +2,7 @@
 
 Single-scene Unity 6 (URP 17, Vulkan) demo: a horizontal glass bottle filled with
 GPU MLS-MPM water, a draggable sailboat, Blender props and a CPU tag rope.
-Open `Assets/WaterSplash/Scenes/BottleVoyage.unity` and press Play.
+Open `Assets/Scenes/BottleVoyage.unity` and press Play.
 
 Drag the boat (hull or sail), flick the neck tag, Space pauses, R resets.
 The slider selects 16K / 32K / 64K / 128K particles (reset on release);
@@ -12,19 +12,25 @@ the button toggles reconstructed water / raw particles without a reset.
 
 | File | Role |
 | --- | --- |
-| `Scripts/Voyage/BottleVoyage.cs` | Scene controller: input, boat probes, UI, frame pacing |
-| `Scripts/Voyage/BottleBoundary.cs` | Analytic bottle profile and initial fill |
+| `Scenes/BottleVoyage.unity` | Bottle / Boat / Table objects and editable uGUI Canvas |
+| `Scripts/Voyage/BottleVoyage.cs` | Scene controller: input, boat probes, UI callbacks, frame pacing |
+| `Scripts/Voyage/BottleBoundary.cs` | Fixed bottle profile, dynamic contacts and baked-state loading |
 | `Scripts/Voyage/TagRope.cs` | CPU position-based cord + rigid tag |
 | `Scripts/Simulation/MlsMpmFluid.cs` | Solver driver: buffers, dispatches, diagnostics readback |
-| `Shaders/BottleMlsMpm.compute` | ClearGrid, Transfer (P2G), UpdateGrid, UpdateParticles (G2P), boundary cache, whitewater |
-| `Shaders/BottleWaterProbe.compute` | Five water-height probes for the boat (80-byte async readback) |
+| `Shaders/BottleFluid.compute` | MLS-MPM, whitewater and five boat water-height probes (80-byte async readback) |
+| `Shaders/BottleWater.shader` | Particle depth/thickness, foam, spray, smoothing, water composition, normals and raw particles |
+| `Shaders/BottleFluidData.hlsl` | Shared particle / whitewater layouts and accessors |
+| `Settings/BottleInitialState.bytes` | Prebaked grid boundary and exact initial positions for all four particle tiers |
 | `Scripts/Rendering/MlsMpmSurfaceFeature.cs` | Screen-space water: depth/thickness, bilateral smoothing, normals, shading, foam |
 | `Editor/Art/BottleVoyageModels.cs` | Import settings for the Blender FBX and baked textures |
 
 ## Solver
 
 - Weakly compressible MLS-MPM, 60 Hz fixed tick, 8 substeps, retained backlog (no FPS cap, no time scaling).
-- Grid window 80 x 30 x 30 (cell 0.0533) around the bottle; static wall flags cached once per reset.
+- Fixed grid window 80 x 30 x 30 (cell 0.0533) around the bottle.
+- Reset uploads baked particle positions and grid wall normals/distances; no spacing search or boundary-cache dispatch.
+  `BottleInitialState.bytes` contains 72,000 boundary float4s, then spacing (float) and position float4s
+  for 16K / 32K / 64K / 128K, in that order. It is specific to this scene's bottle and grid.
 - Every tier keeps the same water volume (鈮?.445 units鲁, fill height 0.73); spacing and radii scale with the cube root of per-particle volume.
 - Particles are stored as SoA float4 planes (`field * particleCount + id`).
 - Fused Packed16 P2G: one transfer pass, (mass, mx) and (my, mz) packed as signed 16-bit fixed point in two contiguous 32-bit atomics per node.
@@ -54,9 +60,11 @@ Props (cork, saddles, neck cord, sailboat, desk still life) are generated headle
 
     blender -b --factory-startup --python Tools/Blender/voyage_models.py -- [rope fittings boat desk]
 
-Output goes to `Assets/WaterSplash/Art/BottleVoyage/Blender` (Cycles-baked atlas: albedo, normal, mask R metal / G AO / A smoothness).
+Output goes to `Assets/Art/BottleVoyage/Blender` (Cycles-baked atlas: albedo, normal, mask R metal / G AO / A smoothness).
 Meshes keep their names, so re-exporting updates the scene in place. The glass, tabletop and seabed are static mesh assets;
 the seabed is merged into one mesh per material.
+The tabletop's static wood grain is baked into the linear `Polish/Tabletop grain.png`;
+bottle transmission and animated caustics remain in the tabletop shader.
 
 ## Android notes
 

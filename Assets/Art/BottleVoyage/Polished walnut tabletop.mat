@@ -27,6 +27,10 @@ Material:
         m_Texture: {fileID: 2800000, guid: 4c047c93b9808484087311225ef92723, type: 3}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
+    - _WoodTex:
+        m_Texture: {fileID: 2800000, guid: 8497112ca96ac2e4b8deeb77979412da, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
     m_Ints: []
     m_Floats:
     - _AOExtent: 3.5

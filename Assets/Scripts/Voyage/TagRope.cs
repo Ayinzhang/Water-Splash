@@ -93,6 +93,7 @@ namespace WaterSplash
             mesh.vertices = vertices; mesh.normals = normals; mesh.uv = uv; mesh.triangles = triangles;
             // Vertices are written in world space, so the renderer lives at the origin.
             frame = new GameObject("Simulated tag cord", typeof(MeshFilter), typeof(MeshRenderer)).transform;
+            frame.SetParent(transform.parent, true);
             frame.gameObject.hideFlags = HideFlags.DontSave;
             frame.GetComponent<MeshFilter>().sharedMesh = mesh;
             frame.GetComponent<MeshRenderer>().sharedMaterial = ropeMaterial;

@@ -7,6 +7,7 @@ Shader "WaterSplash/Bottle Tabletop"
         _Grain("Grain strength", Range(0,1)) = .18
         _PlankWidth("Plank width", Float) = .62
         _Gloss("Oil gloss", Range(0,1)) = .55
+        [NoScaleOffset] _WoodTex("Baked wood grain", 2D) = "gray" {}
         [NoScaleOffset] _AOTex("Baked contact occlusion", 2D) = "white" {}
         _AOExtent("AO world half-extent", Float) = 3.5
         _WaterLevel("Water level relative to bottle axis", Float) = -.05
@@ -32,6 +33,7 @@ Shader "WaterSplash/Bottle Tabletop"
             float _PlankWidth, _AOExtent, _WaterLevel;
             CBUFFER_END
             TEXTURE2D(_AOTex); SAMPLER(sampler_AOTex);
+            TEXTURE2D(_WoodTex); SAMPLER(sampler_WoodTex);
             TEXTURE2D(_VoyageBottleProfile); SAMPLER(sampler_VoyageBottleProfile);
             TEXTURECUBE(_VoyageReflection); SAMPLER(sampler_VoyageReflection);
             float4 _VoyageBottle;
@@ -53,14 +55,6 @@ Shader "WaterSplash/Bottle Tabletop"
                 float a=Hash(dot(c,float2(1,57))), b=Hash(dot(c+float2(1,0),float2(1,57)));
                 float d=Hash(dot(c+float2(0,1),float2(1,57))), e=Hash(dot(c+1,float2(1,57)));
                 return lerp(lerp(a,b,f.x),lerp(d,e,f.x),f.y);
-            }
-
-            // Grain runs along world x; returns the ring intensity for a given plank.
-            float GrainAt(float2 p, float plank)
-            {
-                float2 q=p/6.7+float2(plank*3.7, plank*.31);
-                float warp=sin(q.x*7+q.y*5)*.8+sin(q.x*19-q.y*3)*.2+Noise(q*float2(1.5,9))*.6;
-                return pow(.5+.5*sin(q.y*170+warp*5),9);
             }
 
             // Signed shadow of the horizontal glass bottle, computed analytically
@@ -112,18 +106,18 @@ Shader "WaterSplash/Bottle Tabletop"
                 float seamDistance=abs(p.z-plank*_PlankWidth+_PlankWidth*.5);
                 seamDistance=min(seamDistance,abs(_PlankWidth-seamDistance));
                 float seam=top?1-smoothstep(.002,.007,seamDistance):0;
-                float grain=GrainAt(p.xz,plank);
-                float grainZ=GrainAt(p.xz+float2(0,.002),plank);
-                half tint=Hash(plank+11)*.16-.08;
+                float2 aoUV=p.xz/(2*_AOExtent)+.5;
+                float4 wood=SAMPLE_TEXTURE2D(_WoodTex,sampler_WoodTex,aoUV);
+                float grain=wood.r;
+                half tint=wood.a*.16-.08;
                 half3 albedo=lerp(_BaseColor.rgb*(1+tint),_GrainColor.rgb,grain*_Grain);
                 if (!top) albedo=lerp(albedo,_GrainColor.rgb,.25);
                 albedo*=1-seam*.55;
                 if (top)
                 {
-                    float bump=(grainZ-grain)*.9+Noise(p.xz*float2(3,40))*.04;
+                    float bump=(wood.g-grain)*.9+wood.b*.04;
                     n=normalize(n+half3(0,0,-bump)+half3(0,0,sign(p.z-plank*_PlankWidth)*seam*.35));
                 }
-                float2 aoUV=p.xz/(2*_AOExtent)+.5;
                 half ao=SAMPLE_TEXTURE2D(_AOTex,sampler_AOTex,aoUV).r;
                 Light light=GetMainLight(TransformWorldToShadowCoord(p));
                 half3 l=light.direction;

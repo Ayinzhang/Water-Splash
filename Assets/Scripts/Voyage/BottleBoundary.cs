@@ -1,16 +1,14 @@
-using System.Collections.Generic;
+using System.IO;
 using UnityEngine;
 
 namespace WaterSplash
 {
-    // The glass mesh, initial fill and GPU boundary use this same axial profile.
-    // Bottle axis is world X; the simulation grid remains unrotated.
+    // Fixed BottleVoyage profile; dynamic boat and tag contacts still query it.
     public sealed class BottleBoundary : MonoBehaviour
     {
-        public Vector3 center = new Vector3(0, .91f, 0);
-        public float fillHeight = .73f;
-        public bool mouthFacesLeft;
-        public float AxisSign => mouthFacesLeft ? -1 : 1;
+        public TextAsset initialState;
+        public Vector3 center => new Vector3(0, .91f, 0);
+        public float AxisSign => -1;
         public static readonly Vector2[] Profile = {
             new Vector2(-1.88f,.07f), new Vector2(-1.85f,.30f),
             new Vector2(-1.78f,.51f), new Vector2(-1.66f,.65f),
@@ -73,54 +71,25 @@ namespace WaterSplash
             return local + center;
         }
 
-        public Vector3[] CreateInitialFill(int count, out float spacing)
+        public float LoadInitialState(int count, ComputeBuffer particles, ComputeBuffer boundary)
         {
-            float referenceSpacing = FindFillSpacing(32768);
-            float latticeSpacing = count == 32768 ? referenceSpacing : FindFillSpacing(count);
-            // Particle mass/volume follows one fixed 32K reference, independently
-            // of small lattice-count rounding differences between presets.
-            spacing = referenceSpacing * Mathf.Pow(32768f / count, 1f / 3);
-            var candidates = new List<Vector3>();
-            Fill(latticeSpacing, candidates);
-            var positions = new Vector3[count];
-            // Distribute any omitted lattice sites instead of truncating one end of the bottle.
-            for (int i = 0; i < count; i++) positions[i] = candidates[(int)((long)i * candidates.Count / count)];
-            return positions;
+            using (var reader = new BinaryReader(new MemoryStream(initialState.bytes)))
+            {
+                var cells = new Vector4[boundary.count];
+                for (int i = 0; i < cells.Length; i++) cells[i] = ReadVector(reader);
+                boundary.SetData(cells);
+                // Grid float4s, then [spacing, position float4s] for 16K/32K/64K/128K.
+                int tier = Mathf.RoundToInt(Mathf.Log(count / 16384f, 2));
+                reader.BaseStream.Position += (count - 16384) * 16 + tier * 4;
+                float spacing = reader.ReadSingle();
+                var data = new Vector4[count * 5];
+                for (int i = 0; i < count; i++) data[i] = ReadVector(reader);
+                particles.SetData(data);
+                return spacing;
+            }
         }
 
-        float FindFillSpacing(int count)
-        {
-            float lo = .015f, hi = .075f;
-            for (int i = 0; i < 19; i++)
-            {
-                float mid = (lo + hi) * .5f;
-                if (Fill(mid, null) >= count) lo = mid; else hi = mid;
-            }
-            return lo;
-        }
-        int Fill(float spacing, List<Vector3> output)
-        {
-            int count = 0;
-            float margin = spacing * .85f;
-            for (int y = 0; ; y++)
-            {
-                float py = center.y - .74f + margin + y * spacing;
-                if (py > fillHeight) break;
-                for (int z = 0; ; z++)
-                {
-                    float pz = -.74f + margin + z * spacing;
-                    if (pz > .74f - margin) break;
-                    for (int x = 0; ; x++)
-                    {
-                        float px = Profile[0].x + margin + x * spacing;
-                        if (px > Profile[Profile.Length - 1].x - margin) break;
-                        Vector3 p = new Vector3(px, py - center.y, pz);
-                        if (Distance(p, out _) > -margin) continue;
-                        count++; output?.Add(FromProfile(p));
-                    }
-                }
-            }
-            return count;
-        }
+        static Vector4 ReadVector(BinaryReader reader) =>
+            new Vector4(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
     }
 }

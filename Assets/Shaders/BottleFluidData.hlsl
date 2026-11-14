@@ -1,5 +1,5 @@
-#ifndef MLS_MPM_PARTICLE_STATE_INCLUDED
-#define MLS_MPM_PARTICLE_STATE_INCLUDED
+#ifndef BOTTLE_FLUID_DATA_INCLUDED
+#define BOTTLE_FLUID_DATA_INCLUDED
 
 struct Particle
 {
@@ -41,4 +41,26 @@ void StoreParticle(uint id, Particle p)
     _Particles[id + 4 * _ParticlePlaneStride] = p.affineZ;
 }
 #endif
+
+struct Whitewater
+{
+    float4 position;   // Grid position, remaining lifetime.
+    float4 velocity;   // Grid velocity, initial lifetime.
+    float4 normalType; // Outward surface normal, 0 = spray / 1 = foam.
+};
+
+uint WhitewaterHash(uint value)
+{
+    value ^= value >> 16;
+    value *= 0x7feb352du;
+    value ^= value >> 15;
+    value *= 0x846ca68bu;
+    return value ^ (value >> 16);
+}
+
+float WhitewaterRandom(uint seed)
+{
+    return (WhitewaterHash(seed) & 0x00ffffffu) / 16777216.0;
+}
+
 #endif
