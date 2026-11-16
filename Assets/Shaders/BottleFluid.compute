@@ -1,5 +1,3 @@
-// Weakly compressible MLS-MPM inside the bottle. One substep:
-// ClearGrid -> P2G (packed 16-bit sums) -> UpdateGrid -> G2P.
 #pragma kernel CacheBoundary
 #pragma kernel ClearGrid
 #pragma kernel P2G
@@ -8,15 +6,11 @@
 
 struct Particle
 {
-    float4 position;  // Grid position, 1.
-    float4 velocity;  // Grid velocity, density ratio.
-    float4 affineX;
-    float4 affineY;
-    float4 affineZ;
+    float4 position, velocity, affineX, affineY, affineZ;
 };
 
 RWStructuredBuffer<float4> _Particles;
-uint _ParticlePlaneStride; // Five contiguous streams of this length.
+uint _ParticlePlaneStride;
 
 float4 ParticlePosition(uint id) { return _Particles[id]; }
 float4 ParticleVelocity(uint id) { return _Particles[id + _ParticlePlaneStride]; }
@@ -41,28 +35,19 @@ void StoreParticle(uint id, Particle p)
     _Particles[id + 4 * _ParticlePlaneStride] = p.affineZ;
 }
 
-
-
-RWStructuredBuffer<int> _Accumulation;  // Two packed int16 pairs per cell: (mass, px), (py, pz).
+RWStructuredBuffer<int> _Accumulation;  // (mass, px), (py, pz).
 RWStructuredBuffer<float4> _Grid;       // Velocity, mass.
 RWStructuredBuffer<float4> _StaticGridBoundary;
 
-int _ParticleCount;
-int _Resolution;
-int3 _GridSize;
-int3 _GridOffset;
-int _CellCount;
-float _Dt;
-float _RestDensity;
-float _BulkModulus;
-float _PressureExponent;
-float _Viscosity;
-float3 _Acceleration;
-// Grid-space profile uploaded from BottleBoundary.Profile.
 int _BottleProfileCount;
-float4 _BottleProfile[32];
-float3 _BottleCenter;
 float _BottleClearance;
+float3 _BottleCenter;
+float4 _BottleProfile[32];
+
+int _ParticleCount, _CellCount, _Resolution;
+int3 _GridSize, _GridOffset;
+float _Dt, _RestDensity, _BulkModulus, _PressureExponent, _Viscosity;
+float3 _Acceleration;
 
 float BottleDistance(float3 position, out float3 normal)
 {
@@ -90,6 +75,7 @@ float BottleDistance(float3 position, out float3 normal)
     if (front > distance) { distance = front; normal = float3(1,0,0); }
     return distance;
 }
+
 bool BottleProject(inout float3 position, inout float3 velocity)
 {
     bool contact = false;
@@ -167,48 +153,41 @@ void CacheBoundary(uint id : SV_DispatchThreadID)
 void ClearGrid(uint id : SV_DispatchThreadID)
 {
     if (id >= (uint)_CellCount) return;
-    _Accumulation[id * 2] = 0;
-    _Accumulation[id * 2 + 1] = 0;
-    _Grid[id] = 0;
+    _Accumulation[id * 2] = _Accumulation[id * 2 + 1] = _Grid[id] = 0;
 }
 
-// Single-pass P2G: stress uses the density ratio gathered by the previous G2P (velocity.w).
 [numthreads(128, 1, 1)]
 void P2G(uint id : SV_DispatchThreadID)
 {
     if (id >= (uint)_ParticleCount) return;
+    // Step1: Obtain quadratic B-spline weights
     Particle p = LoadParticle(id);
-    int3 origin;
-    float3 w[3];
+    int3 origin; float3 w[3];
     Weights(p.position.xyz, origin, w);
+    // Step2: Calculate the pressure with the previous density ratio
     float ratio = p.velocity.w > 0 ? p.velocity.w : 1.0;
     float density = ratio * _RestDensity;
     float compression = _PressureExponent == 3 ? ratio * ratio * ratio :
         (_PressureExponent == 1 ? ratio : pow(abs(ratio), _PressureExponent));
     float pressure = _BulkModulus * max(compression - 1.0, 0.0);
+    // Step3: Calculate stress and update the affine matrix
     float3x3 c = float3x3(p.affineX.xyz, p.affineY.xyz, p.affineZ.xyz);
     float3x3 stress = _Viscosity * (c + transpose(c));
-    stress[0][0] -= pressure;
-    stress[1][1] -= pressure;
-    stress[2][2] -= pressure;
-    // For the quadratic B-spline in grid coordinates, the inverse moment is 4 I.
+    stress[0][0] -= pressure; stress[1][1] -= pressure; stress[2][2] -= pressure;
     float3x3 q = c + (-4.0 * _Dt / density) * stress;
-
+    // Step4: Scattered across cells
     uint firstCell = CellIndex(origin);
     uint sliceStride = _GridSize.x * _GridSize.y;
     for (int z = 0; z < 3; z++)
-    for (int y = 0; y < 3; y++)
-    [unroll]
-    for (int x = 0; x < 3; x++)
+        for (int y = 0; y < 3; y++)
+            [unroll] for (int x = 0; x < 3; x++)
     {
         int3 cell = origin + int3(x, y, z);
         float weight = w[x].x * w[y].y * w[z].z;
         float3 momentum = weight * (p.velocity.xyz + mul(q, cell - p.position.xyz));
         uint address = (firstCell + x + y * _GridSize.x + z * sliceStride) * 2;
-        AccumulatePacked(address, (int)round(weight * PackedMassScale),
-            PackedHalf(momentum.x, PackedMomentumScale));
-        AccumulatePacked(address + 1, PackedHalf(momentum.y, PackedMomentumScale),
-            PackedHalf(momentum.z, PackedMomentumScale));
+        AccumulatePacked(address, (int)round(weight * PackedMassScale), PackedHalf(momentum.x, PackedMomentumScale));
+        AccumulatePacked(address + 1, PackedHalf(momentum.y, PackedMomentumScale), PackedHalf(momentum.z, PackedMomentumScale));
     }
 }
 

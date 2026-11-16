@@ -18,7 +18,7 @@ Installed packages and project graphics / Android settings are unchanged.
 ## Suggested rebuild order
 
 Current progress: `BottleVoyage.cs` drives the native uGUI and initializes
-`BottleFluid.cs`. `BottleBoundary.cs` supplies fixed-profile initial positions
+`BottleFluid.cs`. `BottleBoundary.cs` supplies mesh-derived initial positions
 for all four tiers, using the integrated water volume and a fill level of 0.73.
 `BottleFluid.compute` now restores the archived MLS-MPM core: ClearGrid,
 P2G (Packed16), UpdateGrid and G2P. Shared particle and boundary functions are inlined.
@@ -40,9 +40,9 @@ The boundary is attached to Bottle and assigned to BottleFluid in the saved scen
    Bind the existing Slider and Button through the Inspector. First implement
    particle-tier selection, reset and display-mode selection without fluid.
    Commit particle-count changes on pointer release, not every drag update.
-2. **Bottle boundary:** create `BottleBoundary.cs` with the fixed bottle profile,
-   world/profile transforms and contact queries. Use the archived revision for
-   exact geometry constants. Keep fixed initial-state generation in editor code.
+2. **Bottle boundary:** `BottleBoundary.cs` derives the inner profile from the
+   Bottle MeshFilter and supplies world/profile transforms and contact queries.
+   Fill positions, volume and GPU boundary caching share that instance profile.
 3. **Particle display:** create `BottleFluid.cs`, `BottleFluid.compute` and
    `BottleWater.shader`. Start with 16K stationary particles and one billboard pass.
    Establish buffer layout, grid/world coordinates and depth before simulation.
@@ -64,3 +64,30 @@ The boundary is attached to Bottle and assigned to BottleFluid in the saved scen
 Archived baseline: 60 Hz simulation ticks, 8 substeps, 80 x 30 x 30 grid,
 cell size 4 / 75, default 64K particles. Preserve particle volume when changing tiers.
 Vulkan Pre Transform remains disabled in the existing Android configuration.
+
+## Mesh-derived bottle boundary
+
+All extraction lives in `BottleBoundary.cs`; no extra runtime script, physics
+collider or SDF package is required. `BottleBoundary.Awake` builds the profile,
+volume and bounds once. `BottleVoyage.Start` then calls `BottleFluid.Init` to
+generate the fill and upload the profile to `CacheBoundary`. Callers read the
+initialized `profile`, `center`, `bounds` and
+`waterVolume` fields directly. There is no lazy initialization or rebuild on reset.
+Restart Play Mode after editing the mesh or its transform.
+
+The current readable, double-walled rotation mesh supplies 16 inner sections.
+Triangle winding identifies inner versus outer walls in mesh-local coordinates;
+the transform is then applied, including the bottle's negative X scale. Sections
+are assumed to be concentric circles about local X. The axis remains aligned
+with world X; circular
+radial scaling and rotation about that axis are supported, not elliptical scaling,
+shear or arbitrary bottle rotation. The shader supports at most 32 sections.
+This demo assumes a suitable mesh and transform without defensive validation.
+This is an analytic rotation-profile approximation, not triangle-mesh collision;
+the two profile endpoints retain the existing closed-container end constraints.
+
+The center follows the Bottle transform. The fill level remains 0.73 in world
+space, while volume, fill extents and draw bounds follow the extracted profile.
+Each boundary owns its own data. Containers must fit the fixed 80 x 32 x 30
+storage/interpolation support and physical simulation box; using larger or
+relocated bottles also requires updating the simulation grid.
