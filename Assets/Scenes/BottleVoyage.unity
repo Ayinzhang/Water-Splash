@@ -1143,9 +1143,9 @@ RectTransform:
   m_Children:
   - {fileID: 241750711}
   - {fileID: 1816853342}
-  - {fileID: 999622788}
   - {fileID: 617776916}
   - {fileID: 1056966794}
+  - {fileID: 2104957858}
   - {fileID: 1424468868}
   - {fileID: 504085937}
   m_Father: {fileID: 1431912504}
@@ -1328,13 +1328,13 @@ MonoBehaviour:
   m_OnClick:
     m_PersistentCalls:
       m_Calls:
-      - m_Target: {fileID: 1628910112}
-        m_TargetAssemblyTypeName: WaterSplash.BottleVoyage, WaterSplash.MlsMpm
-        m_MethodName: ToggleWater
-        m_Mode: 0
+      - m_Target: {fileID: 927140304}
+        m_TargetAssemblyTypeName: BottleVoyage, Assembly-CSharp
+        m_MethodName: SwitchDisplayMode
+        m_Mode: 1
         m_Arguments:
           m_ObjectArgument: {fileID: 0}
-          m_ObjectArgumentAssemblyTypeName: 
+          m_ObjectArgumentAssemblyTypeName: UnityEngine.Object, UnityEngine
           m_IntArgument: 0
           m_FloatArgument: 0
           m_StringArgument: 
@@ -1497,10 +1497,10 @@ MonoBehaviour:
       m_Calls: []
   m_FontData:
     m_Font: {fileID: 10102, guid: 0000000000000000e000000000000000, type: 0}
-    m_FontSize: 11
+    m_FontSize: 14
     m_FontStyle: 0
     m_BestFit: 0
-    m_MinSize: 10
+    m_MinSize: 1
     m_MaxSize: 40
     m_Alignment: 0
     m_AlignByGeometry: 0
@@ -1508,7 +1508,7 @@ MonoBehaviour:
     m_HorizontalOverflow: 1
     m_VerticalOverflow: 1
     m_LineSpacing: 1
-  m_Text: 64K particles
+  m_Text: 
 --- !u!222 &617776915
 CanvasRenderer:
   m_ObjectHideFlags: 0
@@ -1533,7 +1533,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0, y: 0}
   m_AnchorMax: {x: 0, y: 0}
-  m_AnchoredPosition: {x: 36, y: 35}
+  m_AnchoredPosition: {x: 36, y: 50}
   m_SizeDelta: {x: 750, y: 25}
   m_Pivot: {x: 0, y: 0}
 --- !u!1 &670236902
@@ -2112,6 +2112,7 @@ GameObject:
   - component: {fileID: 927140301}
   - component: {fileID: 927140303}
   - component: {fileID: 927140302}
+  - component: {fileID: 927140304}
   m_Layer: 0
   m_Name: Boat
   m_TagString: Untagged
@@ -2192,6 +2193,22 @@ MeshFilter:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 927140300}
   m_Mesh: {fileID: -5836814945358443977, guid: c9c7162cfd1d0f14bb0e4a3c68427e40, type: 3}
+--- !u!114 &927140304
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 927140300}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a199e13cf2e01614eb2267357ff04434, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::BottleVoyage
+  fluid: {fileID: 1628910117}
+  countText: {fileID: 1056966792}
+  msText: {fileID: 2104957859}
+  tierSlider: {fileID: 1424468866}
 --- !u!1 &928710330
 GameObject:
   m_ObjectHideFlags: 0
@@ -2282,85 +2299,6 @@ MeshFilter:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 928710330}
   m_Mesh: {fileID: 4300000, guid: 542340dedc3e2e84aa4bfcdbdd1184c4, type: 2}
---- !u!1 &999622785
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 999622788}
-  - component: {fileID: 999622787}
-  - component: {fileID: 999622786}
-  m_Layer: 0
-  m_Name: Instructions
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!114 &999622786
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 999622785}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 5f7201a12d95ffc409449d95f23cf332, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.Text
-  m_Material: {fileID: 0}
-  m_Color: {r: 0.32, g: 0.29, b: 0.3125, a: 1}
-  m_RaycastTarget: 0
-  m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}
-  m_Maskable: 1
-  m_OnCullStateChanged:
-    m_PersistentCalls:
-      m_Calls: []
-  m_FontData:
-    m_Font: {fileID: 10102, guid: 0000000000000000e000000000000000, type: 0}
-    m_FontSize: 11
-    m_FontStyle: 0
-    m_BestFit: 0
-    m_MinSize: 10
-    m_MaxSize: 40
-    m_Alignment: 0
-    m_AlignByGeometry: 0
-    m_RichText: 1
-    m_HorizontalOverflow: 1
-    m_VerticalOverflow: 1
-    m_LineSpacing: 1
-  m_Text: DRAG THE SAILBOAT     /     SPACE TO PAUSE     /     R TO RESET
---- !u!222 &999622787
-CanvasRenderer:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 999622785}
-  m_CullTransparentMesh: 1
---- !u!224 &999622788
-RectTransform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 999622785}
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children: []
-  m_Father: {fileID: 393494122}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
-  m_AnchorMin: {x: 0, y: 0}
-  m_AnchorMax: {x: 0, y: 0}
-  m_AnchoredPosition: {x: 36, y: 8}
-  m_SizeDelta: {x: 750, y: 30}
-  m_Pivot: {x: 0, y: 0}
 --- !u!1 &1001263143
 GameObject:
   m_ObjectHideFlags: 0
@@ -2814,7 +2752,6 @@ GameObject:
   - component: {fileID: 1146038362}
   - component: {fileID: 1146038364}
   - component: {fileID: 1146038363}
-  - component: {fileID: 1146038365}
   m_Layer: 0
   m_Name: Voyage luggage tag
   m_TagString: Untagged
@@ -2895,35 +2832,6 @@ MeshFilter:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1146038361}
   m_Mesh: {fileID: 4300000, guid: b2e7596c94047a14783b841ebe118305, type: 2}
---- !u!114 &1146038365
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1146038361}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 4c2e176be8a13bf4ca4d367cd1fea6e1, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: WaterSplash.MlsMpm::WaterSplash.TagRope
-  voyage: {fileID: 1628910112}
-  anchorProfile: {x: 1.51, y: -0.04, z: -0.28}
-  tag: {fileID: 1146038362}
-  ropeMaterial: {fileID: 2100000, guid: 4da6ec119d9bcd4498f4f6bf2b0e4239, type: 2}
-  length: 0.36
-  segments: 16
-  radius: 0.0065
-  tagSize: {x: 0.22, y: 0.3}
-  tableHeight: -0.11
-  gravityScale: 1.4
-  tagMass: 3
-  ropeDrag: 0.9
-  plateDrag: 4.5
-  twistStiffness: 0.9
-  windDirection: {x: 1, y: 0, z: 0.35}
-  windSpeed: 0.55
-  gustSpeed: 0.7
 --- !u!1 &1164642083
 GameObject:
   m_ObjectHideFlags: 0
@@ -3515,7 +3423,7 @@ GameObject:
   m_Component:
   - component: {fileID: 1424468868}
   - component: {fileID: 1424468866}
-  - component: {fileID: 1424468867}
+  - component: {fileID: 1424468869}
   m_Layer: 0
   m_Name: Particle count
   m_TagString: Untagged
@@ -3569,52 +3477,23 @@ MonoBehaviour:
   m_Direction: 0
   m_MinValue: 0
   m_MaxValue: 3
-  m_WholeNumbers: 0
+  m_WholeNumbers: 1
   m_Value: 2
   m_OnValueChanged:
     m_PersistentCalls:
       m_Calls:
-      - m_Target: {fileID: 1628910112}
-        m_TargetAssemblyTypeName: WaterSplash.BottleVoyage, WaterSplash.MlsMpm
-        m_MethodName: PreviewParticleCount
-        m_Mode: 0
+      - m_Target: {fileID: 927140304}
+        m_TargetAssemblyTypeName: BottleVoyage, Assembly-CSharp
+        m_MethodName: OnTierSliderChanged
+        m_Mode: 1
         m_Arguments:
           m_ObjectArgument: {fileID: 0}
-          m_ObjectArgumentAssemblyTypeName: 
+          m_ObjectArgumentAssemblyTypeName: UnityEngine.Object, UnityEngine
           m_IntArgument: 0
           m_FloatArgument: 0
           m_StringArgument: 
           m_BoolArgument: 0
         m_CallState: 2
---- !u!114 &1424468867
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1424468865}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: d0b148fe25e99eb48b9724523833bab1, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.EventSystems.EventTrigger
-  m_Delegates:
-  - eventID: 3
-    callback:
-      m_PersistentCalls:
-        m_Calls:
-        - m_Target: {fileID: 1628910112}
-          m_TargetAssemblyTypeName: WaterSplash.BottleVoyage, WaterSplash.MlsMpm
-          m_MethodName: CommitParticleCount
-          m_Mode: 1
-          m_Arguments:
-            m_ObjectArgument: {fileID: 0}
-            m_ObjectArgumentAssemblyTypeName: 
-            m_IntArgument: 0
-            m_FloatArgument: 0
-            m_StringArgument: 
-            m_BoolArgument: 0
-          m_CallState: 2
 --- !u!224 &1424468868
 RectTransform:
   m_ObjectHideFlags: 0
@@ -3641,6 +3520,35 @@ RectTransform:
   m_AnchoredPosition: {x: -604, y: 55}
   m_SizeDelta: {x: 278, y: 20}
   m_Pivot: {x: 0, y: 0}
+--- !u!114 &1424468869
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1424468865}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d0b148fe25e99eb48b9724523833bab1, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.EventSystems.EventTrigger
+  m_Delegates:
+  - eventID: 3
+    callback:
+      m_PersistentCalls:
+        m_Calls:
+        - m_Target: {fileID: 927140304}
+          m_TargetAssemblyTypeName: BottleVoyage, Assembly-CSharp
+          m_MethodName: OnTierSliderPointerUp
+          m_Mode: 1
+          m_Arguments:
+            m_ObjectArgument: {fileID: 0}
+            m_ObjectArgumentAssemblyTypeName: UnityEngine.Object, UnityEngine
+            m_IntArgument: 0
+            m_FloatArgument: 0
+            m_StringArgument: 
+            m_BoolArgument: 0
+          m_CallState: 2
 --- !u!1 &1431912498
 GameObject:
   m_ObjectHideFlags: 0
@@ -4307,9 +4215,8 @@ GameObject:
   - component: {fileID: 1628910111}
   - component: {fileID: 1628910116}
   - component: {fileID: 1628910115}
-  - component: {fileID: 1628910113}
-  - component: {fileID: 1628910114}
-  - component: {fileID: 1628910112}
+  - component: {fileID: 1628910117}
+  - component: {fileID: 1628910118}
   m_Layer: 0
   m_Name: Bottle
   m_TagString: Untagged
@@ -4344,74 +4251,6 @@ Transform:
   - {fileID: 895209161}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!114 &1628910112
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1628910110}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 148afd63821c2f4499bcade583e449ff, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  fluid: {fileID: 1628910114}
-  boat: {fileID: 927140301}
-  waterCamera: {fileID: 2131149801}
-  boundary: {fileID: 1628910113}
-  tagRope: {fileID: 1146038365}
-  reflection: {fileID: 8900000, guid: c630c421bfdcd6046934f92fec172949, type: 3}
-  bottleProfile: {fileID: 2800000, guid: d654069107c73ef42a4f6798c1fb723e, type: 2}
-  safeArea: {fileID: 393494122}
-  uiRaycaster: {fileID: 1431912501}
-  particleSlider: {fileID: 1424468866}
-  countLabel: {fileID: 1056966792}
-  statusLabel: {fileID: 617776914}
-  footerLabel: {fileID: 999622786}
-  modeLabel: {fileID: 525003994}
---- !u!114 &1628910113
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1628910110}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 7aae816bfcf927445b7ba59878a668a5, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  initialState: {fileID: 4900000, guid: 6c61f521e0038f6428a5feef7d73f8b7, type: 3}
---- !u!114 &1628910114
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1628910110}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 391ed8e7eac8aa046b71c845d4a13305, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  simulationShader: {fileID: 7200000, guid: 7b29fe5ab67056f4f87f6fea42577c84, type: 3}
-  particleCount: 65536
-  substeps: 8
-  soundSpeed: 6
-  pressureExponent: 3
-  viscosity: 0.15
-  gravity: {x: 0, y: -9.81, z: 0}
-  sphereRadius: 0.12
-  renderSurface: 1
-  surfaceRadiusScale: 0.95
-  enableWhitewater: 1
-  whitewaterCapacity: 8192
-  whitewaterEmissionRate: 8
-  whitewaterLifetime: 2.5
-  whitewaterSpeedThreshold: 1.2
-  whitewaterDeformationThreshold: 4
-  whitewaterRadiusScale: 0.4
 --- !u!23 &1628910115
 MeshRenderer:
   m_ObjectHideFlags: 0
@@ -4469,6 +4308,33 @@ MeshFilter:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1628910110}
   m_Mesh: {fileID: 4300000, guid: 554baaf8866701b488eeb8b8f9f141ae, type: 2}
+--- !u!114 &1628910117
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1628910110}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 4431db0092cecf84c971a881edd87c68, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::BottleFluid
+  particleMaterial: {fileID: 2100000, guid: 5dcfce8926bf9c64bbcd45dd878075ad, type: 2}
+  boundary: {fileID: 1628910118}
+  simulation: {fileID: 7200000, guid: ffb53028c76618648999317a5001b46e, type: 3}
+--- !u!114 &1628910118
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1628910110}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 038a9a17dd024074c968a556ab762a9d, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::BottleBoundary
 --- !u!1 &1646191908
 GameObject:
   m_ObjectHideFlags: 0
@@ -4728,6 +4594,85 @@ Transform:
   m_Children: []
   m_Father: {fileID: 1071749260}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &2104957857
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 2104957858}
+  - component: {fileID: 2104957860}
+  - component: {fileID: 2104957859}
+  m_Layer: 0
+  m_Name: Current cost
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!224 &2104957858
+RectTransform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2104957857}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 393494122}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+  m_AnchorMin: {x: 1, y: 0}
+  m_AnchorMax: {x: 1, y: 0}
+  m_AnchoredPosition: {x: -306, y: 26}
+  m_SizeDelta: {x: 66, y: 30}
+  m_Pivot: {x: 0, y: 0}
+--- !u!114 &2104957859
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2104957857}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5f7201a12d95ffc409449d95f23cf332, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.Text
+  m_Material: {fileID: 0}
+  m_Color: {r: 0.32, g: 0.29, b: 0.3125, a: 1}
+  m_RaycastTarget: 0
+  m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}
+  m_Maskable: 1
+  m_OnCullStateChanged:
+    m_PersistentCalls:
+      m_Calls: []
+  m_FontData:
+    m_Font: {fileID: 10102, guid: 0000000000000000e000000000000000, type: 0}
+    m_FontSize: 14
+    m_FontStyle: 0
+    m_BestFit: 0
+    m_MinSize: 10
+    m_MaxSize: 40
+    m_Alignment: 0
+    m_AlignByGeometry: 0
+    m_RichText: 1
+    m_HorizontalOverflow: 1
+    m_VerticalOverflow: 1
+    m_LineSpacing: 1
+  m_Text: 114514ms
+--- !u!222 &2104957860
+CanvasRenderer:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2104957857}
+  m_CullTransparentMesh: 1
 --- !u!1 &2118260621
 GameObject:
   m_ObjectHideFlags: 0

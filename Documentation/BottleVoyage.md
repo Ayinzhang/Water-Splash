@@ -1,72 +1,66 @@
-# Bottle Voyage
+# Bottle Voyage: rewrite starting point
 
-Single-scene Unity 6 (URP 17, Vulkan) demo: a horizontal glass bottle filled with
-GPU MLS-MPM water, a draggable sailboat, Blender props and a CPU tag rope.
-Open `Assets/Scenes/BottleVoyage.unity` and press Play.
+Open `Assets/Scenes/BottleVoyage.unity`.
 
-Drag the boat (hull or sail), flick the neck tag, Space pauses, R resets.
-The slider selects 16K / 32K / 64K / 128K particles (reset on release);
-the button toggles reconstructed water / raw particles without a reset.
+The rewrite retains models, textures, material assets, camera,
+lighting, post-processing, reflection probe and native uGUI controls are retained.
+The roots are Main Camera, Boat, Bottle, Table and UI.
 
-## Code map
+At the rewrite starting point, project C# scripts, assembly definitions, shaders, the custom renderer feature,
+UI callbacks and baked simulation state have been removed. Custom materials now
+use URP Lit or Unlit placeholders; glass is transparent. Water, boat interaction,
+tag simulation, animated seaweed and custom material effects are absent.
 
-| File | Role |
-| --- | --- |
-| `Scenes/BottleVoyage.unity` | Bottle / Boat / Table objects and editable uGUI Canvas |
-| `Scripts/Voyage/BottleVoyage.cs` | Scene controller: input, boat probes, UI callbacks, frame pacing |
-| `Scripts/Voyage/BottleBoundary.cs` | Fixed bottle profile, dynamic contacts and baked-state loading |
-| `Scripts/Voyage/TagRope.cs` | CPU position-based cord + rigid tag |
-| `Scripts/Simulation/MlsMpmFluid.cs` | Solver driver: buffers, dispatches, diagnostics readback |
-| `Shaders/BottleFluid.compute` | MLS-MPM, whitewater and five boat water-height probes (80-byte async readback) |
-| `Shaders/BottleWater.shader` | Particle depth/thickness, foam, spray, smoothing, water composition, normals and raw particles |
-| `Shaders/BottleFluidData.hlsl` | Shared particle / whitewater layouts and accessors |
-| `Settings/BottleInitialState.bytes` | Prebaked grid boundary and exact initial positions for all four particle tiers |
-| `Scripts/Rendering/MlsMpmSurfaceFeature.cs` | Screen-space water: depth/thickness, bilateral smoothing, normals, shading, foam |
-| `Editor/Art/BottleVoyageModels.cs` | Import settings for the Blender FBX and baked textures |
+`Tools/Blender` retains the model-generation sources; `Tools/UnityBridge.ps1`
+retains the editor connection helper. Neither is runtime gameplay code.
+Installed packages and project graphics / Android settings are unchanged.
 
-## Solver
+## Suggested rebuild order
 
-- Weakly compressible MLS-MPM, 60 Hz fixed tick, 8 substeps, retained backlog (no FPS cap, no time scaling).
-- Fixed grid window 80 x 30 x 30 (cell 0.0533) around the bottle.
-- Reset uploads baked particle positions and grid wall normals/distances; no spacing search or boundary-cache dispatch.
-  `BottleInitialState.bytes` contains 72,000 boundary float4s, then spacing (float) and position float4s
-  for 16K / 32K / 64K / 128K, in that order. It is specific to this scene's bottle and grid.
-- Every tier keeps the same water volume (鈮?.445 units鲁, fill height 0.73); spacing and radii scale with the cube root of per-particle volume.
-- Particles are stored as SoA float4 planes (`field * particleCount + id`).
-- Fused Packed16 P2G: one transfer pass, (mass, mx) and (my, mz) packed as signed 16-bit fixed point in two contiguous 32-bit atomics per node.
-  Stress uses the density ratio gathered by the previous G2P. 8-bit sums saturate and are not viable.
-- An invisible sphere follows the boat hull and sweeps at most a quarter cell per substep.
-- Flow-driven whitewater (8K pool) splits into foam and spray append buffers drawn indirectly.
-- Diagnostics: two uints (fault flags, min particle) read back asynchronously once per second; a fault stops the run.
+Current progress: `BottleVoyage.cs` drives the native uGUI and initializes
+`BottleFluid.cs`. `BottleBoundary.cs` supplies fixed-profile initial positions
+for all four tiers, using the integrated water volume and a fill level of 0.73.
+`BottleFluid.compute` now restores the archived MLS-MPM core: ClearGrid,
+P2G (Packed16), UpdateGrid and G2P. Shared particle and boundary functions are inlined.
+The kernel order is CacheBoundary, ClearGrid, P2G, UpdateGrid, G2P.
+CacheBoundary calculates grid wall normals/distances on the GPU once per Init;
+only the remaining four kernels run each simulation substep.
+The driver uses 60 Hz ticks with 8 substeps and an 80 x 32 x 30 grid
+(offset 0, 4, 25); the extra Y padding supports the current finer 128K fill.
+Particle storage is five float4 streams: grid positions, velocity/density ratio,
+and three affine rows. Rest density follows particle count / fixed water volume,
+not the denser candidate lattice from which CreateFill samples.
+`BottleWater.shader` displays particle billboards directly from grid positions.
+There are no custom GPU diagnostics, fault readbacks or automatic fault stops.
+Dispatch thread-count guards and physical collision constraints remain. There is no
+continuous surface, whitewater, boat coupling or tag simulation yet.
+The boundary is attached to Bottle and assigned to BottleFluid in the saved scene.
 
-## Phone results (Adreno 840, Vulkan, 2608 x 1200, development APK)
+1. **Scene controller and UI:** create `Assets/Scripts/BottleVoyage.cs`.
+   Bind the existing Slider and Button through the Inspector. First implement
+   particle-tier selection, reset and display-mode selection without fluid.
+   Commit particle-count changes on pointer release, not every drag update.
+2. **Bottle boundary:** create `BottleBoundary.cs` with the fixed bottle profile,
+   world/profile transforms and contact queries. Use the archived revision for
+   exact geometry constants. Keep fixed initial-state generation in editor code.
+3. **Particle display:** create `BottleFluid.cs`, `BottleFluid.compute` and
+   `BottleWater.shader`. Start with 16K stationary particles and one billboard pass.
+   Establish buffer layout, grid/world coordinates and depth before simulation.
+4. **MLS-MPM:** implement ClearGrid, P2G, UpdateGrid and G2P. Start with a simple
+   container and float particle state, then add bottle contacts. Establish stable
+   motion and density before reproducing Packed16 accumulation.
+5. **Continuous water:** add particle depth, thickness, bilateral smoothing,
+   normals and water composition to `BottleWater.shader`; connect them through
+   `BottleWaterFeature.cs` on the existing URP renderer.
+6. **Boat:** add water-height probes, async readback, buoyancy, drag input and the
+   swept hull obstacle. Keep probe kernels in the fluid compute file.
+7. **Tag:** implement `TagRope.cs` with particle integration, distance constraints,
+   bottle/table contacts, pointer interaction and a dynamic rope mesh.
+8. **Appearance:** replace the placeholder glass, tabletop, seaweed and background
+   materials with your rewritten shaders, preserving existing texture assets.
+9. **Whitewater and mobile tuning:** add foam / spray last, then restore 32K,
+   64K and 128K tiers and bake the finalized initial positions and grid boundary.
 
-| Particles | ms / substep | FPS |
-| --- | --- | --- |
-| 64K | 0.60 | 鈮?20 |
-| 128K | 1.19 | 鈮?8 |
-
-Simulated/wall time 鈮?1.0, zero faults. P2G history at 64K/6 substeps (ms/substep):
-two-pass 2.10 鈫?fused 1.22 鈫?Packed16 0.73 鈫?contiguous packed grid 0.60.
-Rejected after measurement: particle sorting (+0.58 ms per sort, no P2G gain), 64-thread groups (<1%),
-full 27-node unrolling and shared-memory atomic merging (slower), cropped surface targets (marginal).
-
-Analysis tools used: Android Profiler + `FrameTimingManager` GPU deltas (scratch-substep subtraction),
-adb logcat.
-
-## Art
-
-Props (cork, saddles, neck cord, sailboat, desk still life) are generated headlessly in Blender 4.2+ (tested 5.0.1):
-
-    blender -b --factory-startup --python Tools/Blender/voyage_models.py -- [rope fittings boat desk]
-
-Output goes to `Assets/Art/BottleVoyage/Blender` (Cycles-baked atlas: albedo, normal, mask R metal / G AO / A smoothness).
-Meshes keep their names, so re-exporting updates the scene in place. The glass, tabletop and seabed are static mesh assets;
-the seabed is merged into one mesh per material.
-The tabletop's static wood grain is baked into the linear `Polish/Tabletop grain.png`;
-bottle transmission and animated caustics remain in the tabletop shader.
-
-## Android notes
-
-- Keep Player Settings > Vulkan > Pre Transform **disabled**: on the Adreno 840 it clips rendering at x = 1200.
-- Install a full Build APK; Patch And Run APKs depend on separately deployed shadow libraries.
+Archived baseline: 60 Hz simulation ticks, 8 substeps, 80 x 30 x 30 grid,
+cell size 4 / 75, default 64K particles. Preserve particle volume when changing tiers.
+Vulkan Pre Transform remains disabled in the existing Android configuration.
