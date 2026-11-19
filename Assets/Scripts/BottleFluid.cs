@@ -6,6 +6,7 @@ public class BottleFluid : MonoBehaviour
     public Material particleMaterial;
     public BottleBoundary boundary;
     public ComputeShader simulation;
+    public CapsuleCollider boatCollider;
 
     const float cellSize = 4f / 75, deltaTime = 1f / 60;
     const int substeps = 8, cellCount = 80 * 32 * 30;
@@ -20,6 +21,23 @@ public class BottleFluid : MonoBehaviour
     CommandBuffer commands;
     int particleCount;
     float radius, backlog;
+    Vector3 previousBoatCenter;
+
+    public void GetBoatCapsule(out Vector3 a, out Vector3 b, out float r)
+    {
+        Transform t = boatCollider.transform;
+        Vector3 scale = t.lossyScale;
+        scale = new Vector3(Mathf.Abs(scale.x), Mathf.Abs(scale.y), Mathf.Abs(scale.z));
+        int axis = boatCollider.direction;
+        Vector3 direction = axis == 0 ? Vector3.right : axis == 1 ? Vector3.up : Vector3.forward;
+        float radialScale = Mathf.Max(scale[(axis + 1) % 3], scale[(axis + 2) % 3]);
+        r = boatCollider.radius * radialScale;
+        float half = Mathf.Max(0, boatCollider.height * scale[axis] * .5f - r);
+        Vector3 center = t.TransformPoint(boatCollider.center);
+        Vector3 offset = t.TransformDirection(direction).normalized * half;
+        a = center - offset;
+        b = center + offset;
+    }
 
     void Awake() => material = new Material(particleMaterial);
 
@@ -79,13 +97,8 @@ public class BottleFluid : MonoBehaviour
         solver.Dispatch(kernels[0], (cellCount + 127) / 128, 1, 1);
 
         commands = new CommandBuffer { name = "Bottle MLS-MPM" };
-        for (int step = 0; step < substeps; step++)
-        {
-            commands.DispatchCompute(solver, kernels[1], (cellCount + 127) / 128, 1, 1);
-            commands.DispatchCompute(solver, kernels[2], (particleCount + 127) / 128, 1, 1);
-            commands.DispatchCompute(solver, kernels[3], (cellCount + 127) / 128, 1, 1);
-            commands.DispatchCompute(solver, kernels[4], (particleCount + 127) / 128, 1, 1);
-        }
+        GetBoatCapsule(out Vector3 a, out Vector3 b, out _);
+        previousBoatCenter = (a + b) * .5f;
         material.SetBuffer("_Particles", particleBuf);
         material.SetVector("_Origin", gridOrigin);
         material.SetFloat("_CellSize", cellSize);
@@ -99,7 +112,24 @@ public class BottleFluid : MonoBehaviour
         int ticks = Mathf.Min(4, (int)(backlog / deltaTime));
         for (int i = 0; i < ticks; i++)
         {
+            GetBoatCapsule(out Vector3 a, out Vector3 b, out float r);
+            Vector3 targetCenter = (a + b) * .5f;
+            Vector3 velocity = (targetCenter - previousBoatCenter) / (deltaTime * cellSize);
+            Vector3 ga = (a - gridOrigin) / cellSize;
+            Vector3 gb = (b - gridOrigin) / cellSize;
+            commands.Clear();
+            commands.SetComputeVectorParam(solver, "_BoatVelocity", velocity);
+            commands.SetComputeVectorParam(solver, "_BoatA", new Vector4(ga.x, ga.y, ga.z, r / cellSize));
+            commands.SetComputeVectorParam(solver, "_BoatB", gb);
+            for (int step = 0; step < substeps; step++)
+            {
+                commands.DispatchCompute(solver, kernels[1], (cellCount + 127) / 128, 1, 1);
+                commands.DispatchCompute(solver, kernels[2], (particleCount + 127) / 128, 1, 1);
+                commands.DispatchCompute(solver, kernels[3], (cellCount + 127) / 128, 1, 1);
+                commands.DispatchCompute(solver, kernels[4], (particleCount + 127) / 128, 1, 1);
+            }
             Graphics.ExecuteCommandBuffer(commands);
+            previousBoatCenter = targetCenter;
             backlog -= deltaTime;
         }
     }

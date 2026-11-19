@@ -33,7 +33,13 @@ not the denser candidate lattice from which CreateFill samples.
 `BottleWater.shader` displays particle billboards directly from grid positions.
 There are no custom GPU diagnostics, fault readbacks or automatic fault stops.
 Dispatch thread-count guards and physical collision constraints remain. There is no
-continuous surface, whitewater, boat coupling or tag simulation yet.
+continuous surface, whitewater, buoyancy feedback or tag simulation yet.
+Boat dragging lives in BottleVoyage, excludes UI hits and keeps the hull inside
+the bottle at a fixed height. The Boat CapsuleCollider is the editable hull shape:
+its scaled world endpoints/radius are uploaded to the fluid solver. All substeps
+use the current capsule position directly, without interpolation or speed limits,
+constrain grid velocities and project particles out of the
+hull. No Rigidbody is required; water does not yet move or tilt the boat.
 The boundary is attached to Bottle and assigned to BottleFluid in the saved scene.
 
 1. **Scene controller and UI:** create `Assets/Scripts/BottleVoyage.cs`.

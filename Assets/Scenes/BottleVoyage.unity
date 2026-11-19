@@ -2113,6 +2113,7 @@ GameObject:
   - component: {fileID: 927140303}
   - component: {fileID: 927140302}
   - component: {fileID: 927140304}
+  - component: {fileID: 927140305}
   m_Layer: 0
   m_Name: Boat
   m_TagString: Untagged
@@ -2206,9 +2207,34 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::BottleVoyage
   fluid: {fileID: 1628910117}
+  boatCollider: {fileID: 927140305}
+  waterCamera: {fileID: 2131149801}
   countText: {fileID: 1056966792}
   msText: {fileID: 2104957859}
   tierSlider: {fileID: 1424468866}
+--- !u!136 &927140305
+CapsuleCollider:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 927140300}
+  m_Material: {fileID: 0}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_LayerOverridePriority: 0
+  m_IsTrigger: 0
+  m_ProvidesContacts: 0
+  m_Enabled: 1
+  serializedVersion: 2
+  m_Radius: 0.3
+  m_Height: 1.65
+  m_Direction: 2
+  m_Center: {x: 0, y: -0.035, z: -0.04}
 --- !u!1 &928710330
 GameObject:
   m_ObjectHideFlags: 0
@@ -4323,6 +4349,7 @@ MonoBehaviour:
   particleMaterial: {fileID: 2100000, guid: 5dcfce8926bf9c64bbcd45dd878075ad, type: 2}
   boundary: {fileID: 1628910118}
   simulation: {fileID: 7200000, guid: ffb53028c76618648999317a5001b46e, type: 3}
+  boatCollider: {fileID: 927140305}
 --- !u!114 &1628910118
 MonoBehaviour:
   m_ObjectHideFlags: 0

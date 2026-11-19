@@ -48,6 +48,23 @@ int _ParticleCount, _CellCount, _Resolution;
 int3 _GridSize, _GridOffset;
 float _Dt, _RestDensity, _BulkModulus, _PressureExponent, _Viscosity;
 float3 _Acceleration;
+float4 _BoatA; // Capsule endpoint A, radius, in grid units.
+float3 _BoatB, _BoatVelocity;
+
+float BoatDistance(float3 position, out float3 normal)
+{
+    float3 axis = _BoatB - _BoatA.xyz;
+    float t = saturate(dot(position - _BoatA.xyz, axis) / max(dot(axis, axis), 1e-8));
+    float3 delta = position - (_BoatA.xyz + t * axis);
+    float distance = length(delta);
+    normal = distance > 1e-6 ? delta / distance : float3(0, -1, 0);
+    return distance - _BoatA.w;
+}
+
+void BoatVelocity(inout float3 velocity, float3 normal)
+{
+    velocity -= min(dot(velocity - _BoatVelocity, normal), 0) * normal;
+}
 
 float BottleDistance(float3 position, out float3 normal)
 {
@@ -91,7 +108,6 @@ bool BottleProject(inout float3 position, inout float3 velocity)
     return contact;
 }
 
-
 static const float PackedMassScale = 512.0;
 static const float PackedMomentumScale = 32.0;
 
@@ -121,8 +137,6 @@ void Weights(float3 position, out int3 origin, out float3 w[3])
     w[2] = 0.5 * (f - 0.5) * (f - 0.5);
 }
 
-// Two signed 16-bit fixed-point sums share one 32-bit atomic. Modular addition keeps
-// both halves exact as long as each final sum fits in int16; intermediates may wrap.
 int PackedHalf(float value, float scale)
 {
     return (int)round(value * scale);
@@ -138,7 +152,6 @@ int2 UnpackHalves(int value)
     int low = (value << 16) >> 16;
     return int2(low, (value - low) >> 16);
 }
-
 
 [numthreads(128, 1, 1)]
 void CacheBoundary(uint id : SV_DispatchThreadID)
@@ -167,28 +180,27 @@ void P2G(uint id : SV_DispatchThreadID)
     // Step2: Calculate the pressure with the previous density ratio
     float ratio = p.velocity.w > 0 ? p.velocity.w : 1.0;
     float density = ratio * _RestDensity;
-    float compression = _PressureExponent == 3 ? ratio * ratio * ratio :
-        (_PressureExponent == 1 ? ratio : pow(abs(ratio), _PressureExponent));
+    float compression = _PressureExponent == 3 ? ratio * ratio * ratio : (_PressureExponent == 1 ? ratio : pow(ratio, _PressureExponent));
     float pressure = _BulkModulus * max(compression - 1.0, 0.0);
     // Step3: Calculate stress and update the affine matrix
     float3x3 c = float3x3(p.affineX.xyz, p.affineY.xyz, p.affineZ.xyz);
     float3x3 stress = _Viscosity * (c + transpose(c));
     stress[0][0] -= pressure; stress[1][1] -= pressure; stress[2][2] -= pressure;
-    float3x3 q = c + (-4.0 * _Dt / density) * stress;
+    float3x3 q = c - (4 * _Dt / density) * stress;
     // Step4: Scattered across cells
     uint firstCell = CellIndex(origin);
     uint sliceStride = _GridSize.x * _GridSize.y;
     for (int z = 0; z < 3; z++)
         for (int y = 0; y < 3; y++)
             [unroll] for (int x = 0; x < 3; x++)
-    {
-        int3 cell = origin + int3(x, y, z);
-        float weight = w[x].x * w[y].y * w[z].z;
-        float3 momentum = weight * (p.velocity.xyz + mul(q, cell - p.position.xyz));
-        uint address = (firstCell + x + y * _GridSize.x + z * sliceStride) * 2;
-        AccumulatePacked(address, (int)round(weight * PackedMassScale), PackedHalf(momentum.x, PackedMomentumScale));
-        AccumulatePacked(address + 1, PackedHalf(momentum.y, PackedMomentumScale), PackedHalf(momentum.z, PackedMomentumScale));
-    }
+            {
+                int3 cell = origin + int3(x, y, z);
+                float weight = w[x].x * w[y].y * w[z].z;
+                float3 momentum = weight * (p.velocity.xyz + mul(q, cell - p.position.xyz));
+                uint address = (firstCell + x + y * _GridSize.x + z * sliceStride) * 2;
+                AccumulatePacked(address, (int)round(weight * PackedMassScale), PackedHalf(momentum.x, PackedMomentumScale));
+                AccumulatePacked(address + 1, PackedHalf(momentum.y, PackedMomentumScale), PackedHalf(momentum.z, PackedMomentumScale));
+            }
 }
 
 [numthreads(128, 1, 1)]
@@ -202,6 +214,8 @@ void UpdateGrid(uint id : SV_DispatchThreadID)
     float3 velocity = float3(a.y, b.x, b.y) / PackedMomentumScale / mass;
     velocity += _Acceleration * _Dt;
     int3 cell = CellPosition(id);
+    float3 boatNormal;
+    if (BoatDistance(cell, boatNormal) < .5) BoatVelocity(velocity, boatNormal);
     float4 wall = _StaticGridBoundary[id];
     if (wall.w > -(_BottleClearance + .65))
         velocity -= max(dot(velocity, wall.xyz), 0) * wall.xyz;
@@ -214,7 +228,6 @@ void UpdateGrid(uint id : SV_DispatchThreadID)
     _Grid[id] = float4(velocity, mass);
 }
 
-// G2P + advection. Also gathers this substep's density ratio into velocity.w for the next P2G.
 [numthreads(128, 1, 1)]
 void G2P(uint id : SV_DispatchThreadID)
 {
@@ -223,34 +236,39 @@ void G2P(uint id : SV_DispatchThreadID)
     int3 origin;
     float3 w[3];
     Weights(p.position.xyz, origin, w);
-    float3 velocity = 0;
-    float3 cx = 0, cy = 0, cz = 0;
+    // Step1: Interpolation speed and density based on grids
+    float3 velocity = 0, cx = 0, cy = 0, cz = 0;
     float density = 0;
-    uint firstCell = CellIndex(origin);
-    uint sliceStride = _GridSize.x * _GridSize.y;
+    uint firstCell = CellIndex(origin), sliceStride = _GridSize.x * _GridSize.y;
     for (int z = 0; z < 3; z++)
-    for (int y = 0; y < 3; y++)
-    [unroll]
-    for (int x = 0; x < 3; x++)
-    {
-        int3 cell = origin + int3(x, y, z);
-        float weight = w[x].x * w[y].y * w[z].z;
-        float4 node = _Grid[firstCell + x + y * _GridSize.x + z * sliceStride];
-        float3 weighted = weight * node.xyz;
-        density += weight * node.w;
-        float3 offset = cell - p.position.xyz;
-        velocity += weighted;
-        cx += 4.0 * weighted.x * offset;
-        cy += 4.0 * weighted.y * offset;
-        cz += 4.0 * weighted.z * offset;
-    }
-    float ratio = density / _RestDensity;
-    p.velocity.w = ratio;
-
+        for (int y = 0; y < 3; y++)
+        [unroll] for (int x = 0; x < 3; x++)
+        {
+            int3 cell = origin + int3(x, y, z);
+            float weight = w[x].x * w[y].y * w[z].z;
+            float4 node = _Grid[firstCell + x + y * _GridSize.x + z * sliceStride];
+            float3 weighted = weight * node.xyz;
+            density += weight * node.w;
+            float3 offset = cell - p.position.xyz;
+            velocity += weighted;
+            cx += 4.0 * weighted.x * offset;
+            cy += 4.0 * weighted.y * offset;
+            cz += 4.0 * weighted.z * offset;
+        }
+    p.velocity.w = density / _RestDensity;
+    // Step2: Advection + Collision
     float3 position = p.position.xyz + _Dt * velocity;
     bool contact = BottleProject(position, velocity);
-    [unroll]
-    for (int axis = 0; axis < 3; axis++)
+    float3 boatNormal;
+    float boatDistance = BoatDistance(position, boatNormal);
+    if (boatDistance < 0)
+    {
+        position -= boatDistance * boatNormal;
+        BoatVelocity(velocity, boatNormal);
+        contact = true;
+        BottleProject(position, velocity);
+    }
+    [unroll] for (int axis = 0; axis < 3; axis++)
     {
         if (position[axis] < 2.0)
         {
