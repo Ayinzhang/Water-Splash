@@ -3,93 +3,97 @@
 #pragma kernel P2G
 #pragma kernel UpdateGrid
 #pragma kernel G2P
+#pragma kernel ProbeBoat
+#pragma kernel UpdateWhitewater
 
-struct Particle
-{
-    float4 position, velocity, affineX, affineY, affineZ;
-};
+static const float CellSize = 4.0 / 75, Dt = 1.0 / 480, TickDt = 1.0 / 60, Viscosity = .15;
+static const float MassScale = 512, MomentumScale = 32; // Packed16 atomics
+static const float Emission = 8, Lifetime = 2.5, FoamSpeed = 1.2, Deformation = 4;
+static const int Resolution = 80;
+static const int3 GridSize = int3(80, 32, 30), GridOffset = int3(0, 4, 25);
+static const float3 GridOrigin = float3(-2, 0, -2) - 2 * CellSize, Gravity = float3(0, -9.81, 0) / CellSize;
 
-RWStructuredBuffer<float4> _Particles;
-uint _ParticlePlaneStride;
+struct Particle { float4 position, velocity, affineX, affineY, affineZ; }; // velocity.w: density ratio
+struct Whitewater { float4 position, velocity, normalType; };              // position.w: life, velocity.w: lifetime, type: 0 spray 1 foam
 
-float4 ParticlePosition(uint id) { return _Particles[id]; }
-float4 ParticleVelocity(uint id) { return _Particles[id + _ParticlePlaneStride]; }
+RWStructuredBuffer<float4> _Particles; // SoA planes
+RWStructuredBuffer<int> _Accumulation; // (mass, px), (py, pz)
+RWStructuredBuffer<float4> _Grid;      // velocity, mass
+RWStructuredBuffer<float4> _Boundary;  // bottle normal, distance
+RWStructuredBuffer<float4> _BoatSample;
+RWStructuredBuffer<Whitewater> _Whitewater;
+AppendStructuredBuffer<uint> _FoamIndices, _SprayIndices;
 
-Particle LoadParticle(uint id)
+uint _ParticleCount, _Step;
+int _ProfileCount;
+float _RestDensity;
+float3 _BottleCenter, _BoatB, _BoatVelocity, _BoatAngularVelocity;
+float4 _BoatA, _Profile[32], _BoatProbes[5]; // _BoatA.w: radius
+
+float BulkModulus() { return _RestDensity * 12 / (CellSize * CellSize); }
+float Spacing() { return pow(abs(_RestDensity), -1.0 / 3); }
+float Clearance() { return .75 * .85 * Spacing(); }
+
+Particle Load(uint id)
 {
     Particle p;
-    p.position = _Particles[id];
-    p.velocity = _Particles[id + _ParticlePlaneStride];
-    p.affineX = _Particles[id + 2 * _ParticlePlaneStride];
-    p.affineY = _Particles[id + 3 * _ParticlePlaneStride];
-    p.affineZ = _Particles[id + 4 * _ParticlePlaneStride];
+    p.position = _Particles[id]; p.velocity = _Particles[id + _ParticleCount];
+    p.affineX = _Particles[id + 2 * _ParticleCount]; p.affineY = _Particles[id + 3 * _ParticleCount]; p.affineZ = _Particles[id + 4 * _ParticleCount];
     return p;
 }
 
-void StoreParticle(uint id, Particle p)
+void Store(uint id, Particle p)
 {
-    _Particles[id] = p.position;
-    _Particles[id + _ParticlePlaneStride] = p.velocity;
-    _Particles[id + 2 * _ParticlePlaneStride] = p.affineX;
-    _Particles[id + 3 * _ParticlePlaneStride] = p.affineY;
-    _Particles[id + 4 * _ParticlePlaneStride] = p.affineZ;
+    _Particles[id] = p.position; _Particles[id + _ParticleCount] = p.velocity;
+    _Particles[id + 2 * _ParticleCount] = p.affineX; _Particles[id + 3 * _ParticleCount] = p.affineY; _Particles[id + 4 * _ParticleCount] = p.affineZ;
 }
 
-RWStructuredBuffer<int> _Accumulation;  // (mass, px), (py, pz).
-RWStructuredBuffer<float4> _Grid;       // Velocity, mass.
-RWStructuredBuffer<float4> _StaticGridBoundary;
+uint Hash(uint v) { v ^= v >> 16; v *= 0x7feb352du; v ^= v >> 15; v *= 0x846ca68bu; return v ^ (v >> 16); }
+float Random(uint seed) { return (Hash(seed) & 0xffffffu) / 16777216.0; }
 
-int _BottleProfileCount;
-float _BottleClearance;
-float3 _BottleCenter;
-float4 _BottleProfile[32];
+uint CellIndex(int3 cell) { int3 l = cell - GridOffset; return l.x + GridSize.x * (l.y + GridSize.y * l.z); }
+bool ValidCell(int3 cell) { int3 l = cell - GridOffset; return all(l >= 0) && all(l < GridSize); }
+int3 CellPosition(uint id) { return GridOffset + int3(id % GridSize.x, id / GridSize.x % GridSize.y, id / (GridSize.x * GridSize.y)); }
 
-int _ParticleCount, _CellCount, _Resolution;
-int3 _GridSize, _GridOffset;
-float _Dt, _RestDensity, _BulkModulus, _PressureExponent, _Viscosity;
-float3 _Acceleration;
-float4 _BoatA; // Capsule endpoint A, radius, in grid units.
-float3 _BoatB, _BoatVelocity;
+void Weights(float3 position, out int3 origin, out float3 w[3])
+{
+    origin = (int3)floor(position - .5);
+    float3 f = position - origin;
+    w[0] = .5 * (1.5 - f) * (1.5 - f); w[1] = .75 - (f - 1) * (f - 1); w[2] = .5 * (f - .5) * (f - .5);
+}
+
+void Accumulate(uint address, float low, float high) { InterlockedAdd(_Accumulation[address], asint(asuint((int)round(low)) + (asuint((int)round(high)) << 16))); }
+int2 Unpack(int v) { int low = (v << 16) >> 16; return int2(low, (v - low) >> 16); }
 
 float BoatDistance(float3 position, out float3 normal)
 {
     float3 axis = _BoatB - _BoatA.xyz;
-    float t = saturate(dot(position - _BoatA.xyz, axis) / max(dot(axis, axis), 1e-8));
-    float3 delta = position - (_BoatA.xyz + t * axis);
-    float distance = length(delta);
-    normal = distance > 1e-6 ? delta / distance : float3(0, -1, 0);
-    return distance - _BoatA.w;
+    float3 delta = position - (_BoatA.xyz + saturate(dot(position - _BoatA.xyz, axis) / dot(axis, axis)) * axis);
+    float d = length(delta);
+    normal = d > 1e-6 ? delta / d : float3(0, -1, 0);
+    return d - _BoatA.w;
 }
 
-void BoatVelocity(inout float3 velocity, float3 normal)
+void BoatVelocity(inout float3 velocity, float3 position, float3 normal)
 {
-    velocity -= min(dot(velocity - _BoatVelocity, normal), 0) * normal;
+    float3 hull = _BoatVelocity + cross(_BoatAngularVelocity, position - (_BoatA.xyz + _BoatB) * .5);
+    velocity -= min(dot(velocity - hull, normal), 0) * normal;
 }
 
 float BottleDistance(float3 position, out float3 normal)
 {
     float3 p = position - _BottleCenter;
-    float radius = _BottleProfile[0].y;
-    float slope = 0;
-    for (int i = 0; i < _BottleProfileCount - 1; i++)
+    float radius = _Profile[0].y, slope = 0;
+    for (int i = 0; i < _ProfileCount - 1; i++)
     {
-        float2 a = _BottleProfile[i].xy, b = _BottleProfile[i + 1].xy;
-        if (p.x <= b.x || i == _BottleProfileCount - 2)
-        {
-            slope = (b.y - a.y) / (b.x - a.x);
-            radius = lerp(a.y, b.y, saturate((p.x - a.x) / (b.x - a.x)));
-            break;
-        }
+        float2 a = _Profile[i].xy, b = _Profile[i + 1].xy;
+        if (p.x <= b.x || i == _ProfileCount - 2) { slope = (b.y - a.y) / (b.x - a.x); radius = lerp(a.y, b.y, saturate((p.x - a.x) / (b.x - a.x))); break; }
     }
-    float radial = length(p.yz);
-    float norm = sqrt(1 + slope * slope);
-    float distance = (radial - radius) / norm;
-    normal = float3(-slope, radial > 1e-7 ? p.y / radial : 1,
-        radial > 1e-7 ? p.z / radial : 0) / norm;
-    float back = _BottleProfile[0].x - p.x;
-    float front = p.x - _BottleProfile[_BottleProfileCount - 1].x;
-    if (back > distance) { distance = back; normal = float3(-1,0,0); }
-    if (front > distance) { distance = front; normal = float3(1,0,0); }
+    float radial = length(p.yz), norm = sqrt(1 + slope * slope), distance = (radial - radius) / norm;
+    normal = float3(-slope, radial > 1e-7 ? p.yz / radial : float2(1, 0)) / norm;
+    float back = _Profile[0].x - p.x, front = p.x - _Profile[_ProfileCount - 1].x;
+    if (back > distance) { distance = back; normal = float3(-1, 0, 0); }
+    if (front > distance) { distance = front; normal = float3(1, 0, 0); }
     return distance;
 }
 
@@ -99,7 +103,7 @@ bool BottleProject(inout float3 position, inout float3 velocity)
     [unroll] for (int i = 0; i < 8; i++)
     {
         float3 normal;
-        float distance = BottleDistance(position, normal) + _BottleClearance;
+        float distance = BottleDistance(position, normal) + Clearance();
         if (distance <= 0) break;
         position -= normal * (distance + 1e-4);
         velocity -= max(dot(velocity, normal), 0) * normal;
@@ -108,185 +112,223 @@ bool BottleProject(inout float3 position, inout float3 velocity)
     return contact;
 }
 
-static const float PackedMassScale = 512.0;
-static const float PackedMomentumScale = 32.0;
-
-uint CellIndex(int3 cell)
+bool BoxProject(inout float3 position, inout float3 velocity)
 {
-    int3 local = cell - _GridOffset;
-    return local.x + _GridSize.x * (local.y + _GridSize.y * local.z);
-}
-
-bool ValidCell(int3 cell)
-{
-    int3 local = cell - _GridOffset;
-    return all(local >= 0) && all(local < _GridSize);
-}
-
-int3 CellPosition(uint id)
-{
-    return _GridOffset + int3(id % _GridSize.x, (id / _GridSize.x) % _GridSize.y, id / (_GridSize.x * _GridSize.y));
-}
-
-void Weights(float3 position, out int3 origin, out float3 w[3])
-{
-    origin = (int3)floor(position - 0.5);
-    float3 f = position - origin;
-    w[0] = 0.5 * (1.5 - f) * (1.5 - f);
-    w[1] = 0.75 - (f - 1.0) * (f - 1.0);
-    w[2] = 0.5 * (f - 0.5) * (f - 0.5);
-}
-
-int PackedHalf(float value, float scale)
-{
-    return (int)round(value * scale);
-}
-
-void AccumulatePacked(uint address, int low, int high)
-{
-    InterlockedAdd(_Accumulation[address], asint(asuint(low) + (asuint(high) << 16)));
-}
-
-int2 UnpackHalves(int value)
-{
-    int low = (value << 16) >> 16;
-    return int2(low, (value - low) >> 16);
+    bool contact = false;
+    [unroll] for (int i = 0; i < 3; i++)
+    {
+        if (position[i] < 2) { position[i] = 2; velocity[i] = max(velocity[i], 0); contact = true; }
+        if (position[i] > Resolution - 3) { position[i] = Resolution - 3; velocity[i] = min(velocity[i], 0); contact = true; }
+    }
+    return contact;
 }
 
 [numthreads(128, 1, 1)]
 void CacheBoundary(uint id : SV_DispatchThreadID)
 {
-    if (id >= (uint)_CellCount) return;
     float3 normal;
     float distance = BottleDistance(CellPosition(id), normal);
-    _StaticGridBoundary[id] = float4(normal, distance);
+    _Boundary[id] = float4(normal, distance);
 }
 
 [numthreads(128, 1, 1)]
-void ClearGrid(uint id : SV_DispatchThreadID)
-{
-    if (id >= (uint)_CellCount) return;
-    _Accumulation[id * 2] = _Accumulation[id * 2 + 1] = _Grid[id] = 0;
-}
+void ClearGrid(uint id : SV_DispatchThreadID) { _Accumulation[id * 2] = _Accumulation[id * 2 + 1] = 0; _Grid[id] = 0; }
 
 [numthreads(128, 1, 1)]
 void P2G(uint id : SV_DispatchThreadID)
 {
-    if (id >= (uint)_ParticleCount) return;
-    // Step1: Obtain quadratic B-spline weights
-    Particle p = LoadParticle(id);
+    Particle p = Load(id);
     int3 origin; float3 w[3];
     Weights(p.position.xyz, origin, w);
-    // Step2: Calculate the pressure with the previous density ratio
-    float ratio = p.velocity.w > 0 ? p.velocity.w : 1.0;
-    float density = ratio * _RestDensity;
-    float compression = _PressureExponent == 3 ? ratio * ratio * ratio : (_PressureExponent == 1 ? ratio : pow(ratio, _PressureExponent));
-    float pressure = _BulkModulus * max(compression - 1.0, 0.0);
-    // Step3: Calculate stress and update the affine matrix
-    float3x3 c = float3x3(p.affineX.xyz, p.affineY.xyz, p.affineZ.xyz);
-    float3x3 stress = _Viscosity * (c + transpose(c));
+    // Cubic pressure from the previous density ratio
+    float ratio = p.velocity.w, pressure = BulkModulus() * max(ratio * ratio * ratio - 1, 0);
+    float3x3 c = float3x3(p.affineX.xyz, p.affineY.xyz, p.affineZ.xyz), stress = Viscosity * (c + transpose(c));
     stress[0][0] -= pressure; stress[1][1] -= pressure; stress[2][2] -= pressure;
-    float3x3 q = c - (4 * _Dt / density) * stress;
-    // Step4: Scattered across cells
-    uint firstCell = CellIndex(origin);
-    uint sliceStride = _GridSize.x * _GridSize.y;
+    float3x3 q = c - (4 * Dt / (ratio * _RestDensity)) * stress;
+    uint first = CellIndex(origin);
     for (int z = 0; z < 3; z++)
         for (int y = 0; y < 3; y++)
             [unroll] for (int x = 0; x < 3; x++)
             {
                 int3 cell = origin + int3(x, y, z);
                 float weight = w[x].x * w[y].y * w[z].z;
-                float3 momentum = weight * (p.velocity.xyz + mul(q, cell - p.position.xyz));
-                uint address = (firstCell + x + y * _GridSize.x + z * sliceStride) * 2;
-                AccumulatePacked(address, (int)round(weight * PackedMassScale), PackedHalf(momentum.x, PackedMomentumScale));
-                AccumulatePacked(address + 1, PackedHalf(momentum.y, PackedMomentumScale), PackedHalf(momentum.z, PackedMomentumScale));
+                float3 momentum = weight * (p.velocity.xyz + mul(q, cell - p.position.xyz)) * MomentumScale;
+                uint address = (first + x + y * GridSize.x + z * GridSize.x * GridSize.y) * 2;
+                Accumulate(address, weight * MassScale, momentum.x);
+                Accumulate(address + 1, momentum.y, momentum.z);
             }
 }
 
 [numthreads(128, 1, 1)]
 void UpdateGrid(uint id : SV_DispatchThreadID)
 {
-    if (id >= (uint)_CellCount) return;
-    int2 a = UnpackHalves(_Accumulation[id * 2]);
-    int2 b = UnpackHalves(_Accumulation[id * 2 + 1]);
-    float mass = a.x / PackedMassScale;
+    int2 a = Unpack(_Accumulation[id * 2]), b = Unpack(_Accumulation[id * 2 + 1]);
+    float mass = a.x / MassScale;
     if (mass <= 0) return;
-    float3 velocity = float3(a.y, b.x, b.y) / PackedMomentumScale / mass;
-    velocity += _Acceleration * _Dt;
+    float3 velocity = float3(a.y, b.x, b.y) / MomentumScale / mass + Gravity * Dt, normal;
     int3 cell = CellPosition(id);
-    float3 boatNormal;
-    if (BoatDistance(cell, boatNormal) < .5) BoatVelocity(velocity, boatNormal);
-    float4 wall = _StaticGridBoundary[id];
-    if (wall.w > -(_BottleClearance + .65))
-        velocity -= max(dot(velocity, wall.xyz), 0) * wall.xyz;
-    if (cell.x < 3) velocity.x = max(velocity.x, 0);
-    if (cell.y < 3) velocity.y = max(velocity.y, 0);
-    if (cell.z < 3) velocity.z = max(velocity.z, 0);
-    if (cell.x > _Resolution - 4) velocity.x = min(velocity.x, 0);
-    if (cell.y > _Resolution - 4) velocity.y = min(velocity.y, 0);
-    if (cell.z > _Resolution - 4) velocity.z = min(velocity.z, 0);
+    if (BoatDistance(cell, normal) < .5) BoatVelocity(velocity, cell, normal);
+    float4 wall = _Boundary[id];
+    if (wall.w > -(Clearance() + .65)) velocity -= max(dot(velocity, wall.xyz), 0) * wall.xyz;
+    velocity = cell < 3 ? max(velocity, 0) : cell > Resolution - 4 ? min(velocity, 0) : velocity;
     _Grid[id] = float4(velocity, mass);
 }
 
 [numthreads(128, 1, 1)]
 void G2P(uint id : SV_DispatchThreadID)
 {
-    if (id >= (uint)_ParticleCount) return;
-    Particle p = LoadParticle(id);
-    int3 origin;
-    float3 w[3];
+    Particle p = Load(id);
+    int3 origin; float3 w[3];
     Weights(p.position.xyz, origin, w);
-    // Step1: Interpolation speed and density based on grids
     float3 velocity = 0, cx = 0, cy = 0, cz = 0;
     float density = 0;
-    uint firstCell = CellIndex(origin), sliceStride = _GridSize.x * _GridSize.y;
+    uint first = CellIndex(origin);
     for (int z = 0; z < 3; z++)
         for (int y = 0; y < 3; y++)
-        [unroll] for (int x = 0; x < 3; x++)
-        {
-            int3 cell = origin + int3(x, y, z);
-            float weight = w[x].x * w[y].y * w[z].z;
-            float4 node = _Grid[firstCell + x + y * _GridSize.x + z * sliceStride];
-            float3 weighted = weight * node.xyz;
-            density += weight * node.w;
-            float3 offset = cell - p.position.xyz;
-            velocity += weighted;
-            cx += 4.0 * weighted.x * offset;
-            cy += 4.0 * weighted.y * offset;
-            cz += 4.0 * weighted.z * offset;
-        }
-    p.velocity.w = density / _RestDensity;
-    // Step2: Advection + Collision
-    float3 position = p.position.xyz + _Dt * velocity;
+            [unroll] for (int x = 0; x < 3; x++)
+            {
+                float weight = w[x].x * w[y].y * w[z].z;
+                float4 node = _Grid[first + x + y * GridSize.x + z * GridSize.x * GridSize.y];
+                float3 v = weight * node.xyz, offset = origin + int3(x, y, z) - p.position.xyz;
+                density += weight * node.w; velocity += v;
+                cx += 4 * v.x * offset; cy += 4 * v.y * offset; cz += 4 * v.z * offset;
+            }
+    float3 position = p.position.xyz + Dt * velocity, normal;
     bool contact = BottleProject(position, velocity);
-    float3 boatNormal;
-    float boatDistance = BoatDistance(position, boatNormal);
-    if (boatDistance < 0)
-    {
-        position -= boatDistance * boatNormal;
-        BoatVelocity(velocity, boatNormal);
-        contact = true;
-        BottleProject(position, velocity);
-    }
-    [unroll] for (int axis = 0; axis < 3; axis++)
-    {
-        if (position[axis] < 2.0)
-        {
-            position[axis] = 2.0;
-            velocity[axis] = max(velocity[axis], 0);
-            contact = true;
-        }
-        if (position[axis] > _Resolution - 3.0)
-        {
-            position[axis] = _Resolution - 3.0;
-            velocity[axis] = min(velocity[axis], 0);
-            contact = true;
-        }
-    }
+    float boat = BoatDistance(position, normal);
+    if (boat < 0) { position -= boat * normal; BoatVelocity(velocity, position, normal); BottleProject(position, velocity); contact = true; }
+    contact = BoxProject(position, velocity) || contact;
     p.position = float4(position, 1);
-    p.velocity.xyz = velocity;
-    p.affineX = float4(contact ? 0 : cx, 0);
-    p.affineY = float4(contact ? 0 : cy, 0);
-    p.affineZ = float4(contact ? 0 : cz, 0);
-    StoreParticle(id, p);
+    p.velocity = float4(velocity, density / _RestDensity);
+    p.affineX = float4(contact ? 0 : cx, 0); p.affineY = float4(contact ? 0 : cy, 0); p.affineZ = float4(contact ? 0 : cz, 0);
+    Store(id, p);
+}
+
+// Scan grid columns around each probe for the water surface height and flow
+[numthreads(1, 1, 1)]
+void ProbeBoat(uint3 id : SV_DispatchThreadID)
+{
+    float3 center = _BoatProbes[id.x].xyz, normal;
+    int2 base = (int2)floor(center.xz);
+    float heightSum = 0, heightWeight = 0, flowWeight = 0, threshold = _RestDensity * .2;
+    float2 flowSum = 0;
+    int reach = (int)ceil(_BoatA.w + 2);
+    for (int z = -reach; z <= reach; z++)
+        for (int x = -reach; x <= reach; x++)
+        {
+            int2 column = base + int2(x, z);
+            if (BoatDistance(float3(column.x, center.y, column.y), normal) <= .5) continue; // skip the hull cavity
+            float weight = 1 / (1 + dot(column - center.xz, column - center.xz));
+            for (int y = GridOffset.y + GridSize.y - 2; y > GridOffset.y; y--)
+            {
+                int3 cell = int3(column.x, y, column.y);
+                if (!ValidCell(cell) || !ValidCell(cell + int3(0, 1, 0))) continue;
+                float mass = _Grid[CellIndex(cell)].w, above = _Grid[CellIndex(cell + int3(0, 1, 0))].w;
+                if (mass <= threshold || above > threshold || _Grid[CellIndex(cell - int3(0, 1, 0))].w <= threshold) continue;
+                heightSum += (y + saturate((mass - threshold) / (mass - above))) * weight; heightWeight += weight;
+                for (int d = 1; d <= 3; d++)
+                {
+                    int3 below = cell - int3(0, d, 0);
+                    if (!ValidCell(below) || BoatDistance(below, normal) <= .5) continue;
+                    float4 node = _Grid[CellIndex(below)];
+                    if (node.w > threshold) { flowSum += node.xz * weight * node.w; flowWeight += weight * node.w; }
+                }
+                break;
+            }
+        }
+    _BoatSample[id.x] = heightWeight > 0 ? float4(GridOrigin.y + heightSum / heightWeight * CellSize, flowWeight > 0 ? flowSum / flowWeight * CellSize : 0, 1) : 0;
+}
+
+float Mass(int3 cell) { return ValidCell(cell) ? _Grid[CellIndex(cell)].w / _RestDensity : 0; }
+
+float4 Flow(float3 position) // velocity, density ratio
+{
+    int3 origin = (int3)floor(position);
+    float3 f = position - origin;
+    float4 result = 0;
+    float weightSum = 0;
+    [unroll] for (int i = 0; i < 8; i++)
+    {
+        int3 o = int3(i & 1, i >> 1 & 1, i >> 2), cell = origin + o;
+        if (!ValidCell(cell)) continue;
+        float3 w3 = lerp(1 - f, f, o);
+        float weight = w3.x * w3.y * w3.z;
+        float4 node = _Grid[CellIndex(cell)];
+        result.w += weight * node.w / _RestDensity;
+        if (node.w > _RestDensity * .03) { result.xyz += weight * node.xyz; weightSum += weight; }
+    }
+    result.xyz /= max(weightSum, 1e-6);
+    return result;
+}
+
+bool Surface(float3 position, float density, out float3 normal, out float gradientSize)
+{
+    int3 cell = (int3)round(position);
+    float3 gradient = .5 * float3(Mass(cell + int3(1, 0, 0)) - Mass(cell - int3(1, 0, 0)),
+        Mass(cell + int3(0, 1, 0)) - Mass(cell - int3(0, 1, 0)), Mass(cell + int3(0, 0, 1)) - Mass(cell - int3(0, 0, 1)));
+    gradientSize = length(gradient);
+    normal = -gradient / max(gradientSize, 1e-6);
+    if (density < .08 || density > 2.5 || gradientSize < .025) return false;
+    // Empty solid boundaries are not a water-air interface
+    if (any((position < 3.3) * (normal < -.25)) || any((position > Resolution - 4.3) * (normal > .25))) return false;
+    float3 n;
+    if (BoatDistance(position, n) < 1.2 && dot(normal, n) < 0) return false;
+    if (BottleDistance(position, n) > -1.5 && dot(normal, n) > .2) return false;
+    return Mass((int3)round(position + normal * 1.5)) < .3;
+}
+
+void Collide(inout Whitewater p)
+{
+    BottleProject(p.position.xyz, p.velocity.xyz);
+    BoxProject(p.position.xyz, p.velocity.xyz);
+    float3 normal;
+    float d = BoatDistance(p.position.xyz, normal);
+    if (d < 0) { p.position.xyz -= d * normal; BoatVelocity(p.velocity.xyz, p.position.xyz, normal); }
+}
+
+[numthreads(128, 1, 1)]
+void UpdateWhitewater(uint id : SV_DispatchThreadID)
+{
+    Whitewater p = _Whitewater[id];
+    float3 normal = 0; float gradientSize = 0;
+    if (p.position.w > 0)
+    {
+        float4 flow = Flow(p.position.xyz);
+        bool surface = Surface(p.position.xyz, flow.w, normal, gradientSize);
+        if (surface && (p.normalType.w > .5 || flow.w > .25)) // foam rides the flow
+        {
+            p.normalType = float4(normal, 1);
+            p.velocity.xyz = lerp(p.velocity.xyz, flow.xyz, 1 - exp(-10 * TickDt));
+            p.position.xyz += normal * clamp((flow.w - .4) / max(gradientSize, .05), -.5, .5);
+        }
+        else { p.normalType.w = 0; p.velocity.xyz = (p.velocity.xyz + Gravity * TickDt) * exp(-.25 * TickDt); } // spray is ballistic
+        p.position.xyz += p.velocity.xyz * TickDt;
+        p.position.w -= TickDt * (!surface && flow.w > .6 ? 6 : 1);
+        Collide(p);
+        if (p.position.w <= 0) p = (Whitewater)0;
+    }
+    if (p.position.w <= 0) // try to emit from a random surface particle
+    {
+        uint seed = Hash(id ^ _Step * 747796405u);
+        Particle s = Load(seed % _ParticleCount);
+        if (Surface(s.position.xyz, Flow(s.position.xyz).w, normal, gradientSize))
+        {
+            float speed = length(s.velocity.xyz) * CellSize, outgoing = dot(s.velocity.xyz, normal) * CellSize;
+            float strain = sqrt(dot(s.affineX.xyz, s.affineX.xyz) + dot(s.affineY.xyz, s.affineY.xyz) + dot(s.affineZ.xyz, s.affineZ.xyz));
+            float3 curl = float3(s.affineZ.y - s.affineY.z, s.affineX.z - s.affineZ.x, s.affineY.x - s.affineX.y);
+            float activity = saturate((speed - FoamSpeed) / FoamSpeed) * saturate((strain + .5 * length(curl) - Deformation) / 12) * lerp(.45, 1, saturate(outgoing / 2));
+            if (Random(seed + 17) < 1 - exp(-Emission * activity * TickDt))
+            {
+                float3 jitter = float3(Random(seed + 1), Random(seed + 2), Random(seed + 3)) * 2 - 1;
+                float spray = outgoing > 1.2, life = Lifetime * lerp(.7, 1.3, Random(seed + 4)) * (spray ? .6 : 1);
+                p.position = float4(s.position.xyz + Spacing() * (normal * .65 + jitter * .15), life);
+                p.velocity = float4(s.velocity.xyz + spray * (jitter + normal) * max(speed * .12, .25) / CellSize, life);
+                p.normalType = float4(normal, 1 - spray);
+                Collide(p);
+            }
+        }
+    }
+    _Whitewater[id] = p;
+    if (p.position.w <= 0) return;
+    if (p.normalType.w > .5) _FoamIndices.Append(id); else _SprayIndices.Append(id);
 }

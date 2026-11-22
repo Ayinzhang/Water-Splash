@@ -1,135 +1,80 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-[RequireComponent(typeof(MeshFilter))]
 public class BottleBoundary : MonoBehaviour
 {
-    public const int maxProfileCount = 32;
     public const float waterLevel = .73f;
-
-    [System.NonSerialized] public Vector2[] profile;
+    [System.NonSerialized] public Vector2[] profile; // (x, radius) around the bottle axis, relative to center
     [System.NonSerialized] public Vector3 center;
-    [System.NonSerialized] public Bounds bounds;
     [System.NonSerialized] public float waterVolume;
-    float maximumRadius;
-
-    public Vector3 ToProfile(Vector3 world) => world - center;
-
-    public Vector3 FromProfile(Vector3 p) => center + p;
+    float maxRadius;
 
     void Awake()
     {
         center = transform.position;
-        profile = ExtractProfile(GetComponent<MeshFilter>().sharedMesh, transform.localToWorldMatrix, center);
-        foreach (Vector2 point in profile) maximumRadius = Mathf.Max(maximumRadius, point.y);
-        float waterY = waterLevel - center.y;
-        const int samples = 200;
-        float xMin = profile[0].x;
-        float xMax = profile[profile.Length - 1].x;
-        float dx = (xMax - xMin) / samples;
-
-        for (int i = 0; i < samples; i++)
+        profile = ExtractProfile(GetComponent<MeshFilter>().sharedMesh);
+        foreach (var p in profile) maxRadius = Mathf.Max(maxRadius, p.y);
+        float y = waterLevel - center.y, x0 = profile[0].x, dx = (profile[^1].x - x0) / 200;
+        for (int i = 0; i < 200; i++) // integrate the circular segment below the water line
         {
-            float x = xMin + (i + 0.5f) * dx;
-            float r = Radius(profile, x, 0);
-            if (waterY <= -r) continue;
-            float area = waterY >= r ? Mathf.PI * r * r :
-                r * r * Mathf.Acos(-waterY / r) + waterY * Mathf.Sqrt(Mathf.Max(0, r * r - waterY * waterY));
-            waterVolume += area * dx;
+            float r = Radius(x0 + (i + .5f) * dx);
+            if (y > -r) waterVolume += (y >= r ? Mathf.PI * r * r : r * r * Mathf.Acos(-y / r) + y * Mathf.Sqrt(r * r - y * y)) * dx;
         }
-        bounds = new Bounds(center + Vector3.right * ((xMin + xMax) * .5f), new Vector3(xMax - xMin, 2 * maximumRadius, 2 * maximumRadius));
     }
 
-    static Vector2[] ExtractProfile(Mesh mesh, Matrix4x4 matrix, Vector3 origin)
+    Vector2[] ExtractProfile(Mesh mesh)
     {
-        Vector3[] vertices = mesh.vertices;
-        int[] triangles = mesh.triangles;
-        var innerIndices = new HashSet<int>();
-        for (int i = 0; i < triangles.Length; i += 3)
+        Vector3[] v = mesh.vertices; int[] t = mesh.triangles;
+        var inner = new HashSet<int>();
+        for (int i = 0; i < t.Length; i += 3) // inner wall faces the axis, end caps don't
         {
-            Vector3 a = vertices[triangles[i]], b = vertices[triangles[i + 1]], c = vertices[triangles[i + 2]];
-            Vector3 normal = Vector3.Cross(b - a, c - a);
-            Vector3 radial = (a + b + c) / 3;
+            Vector3 a = v[t[i]], b = v[t[i + 1]], c = v[t[i + 2]], n = Vector3.Cross(b - a, c - a), radial = (a + b + c) / 3;
             radial.x = 0;
-            float facing = Vector3.Dot(normal, radial);
-            float threshold = normal.magnitude * radial.magnitude * 1e-4f;
-            if (facing >= -threshold) continue;
-            for (int j = 0; j < 3; j++) innerIndices.Add(triangles[i + j]);
+            if (Vector3.Dot(n, radial) < -n.magnitude * radial.magnitude * 1e-4f) { inner.Add(t[i]); inner.Add(t[i + 1]); inner.Add(t[i + 2]); }
         }
-
-        var inner = new List<Vector3>(innerIndices.Count);
-        foreach (int i in innerIndices) inner.Add(matrix.MultiplyPoint3x4(vertices[i]) - origin);
-        inner.Sort((a, b) => a.x.CompareTo(b.x));
-        float extent = 0;
-        foreach (Vector3 point in inner) extent = Mathf.Max(extent, point.magnitude);
-        float tolerance = Mathf.Max(1e-6f, extent * 1e-5f);
-        var points = new List<Vector2>();
-        for (int begin = 0; begin < inner.Count;)
+        var points = new List<Vector3>();
+        foreach (int i in inner) points.Add(transform.TransformPoint(v[i]) - center);
+        points.Sort((a, b) => a.x.CompareTo(b.x));
+        var result = new List<Vector2>();
+        for (int begin = 0, end; begin < points.Count; begin = end) // average each ring
         {
-            int end = begin + 1;
-            while (end < inner.Count && inner[end].x - inner[begin].x <= tolerance) end++;
-            double sumX = 0, sumRadius = 0;
-            for (int i = begin; i < end; i++)
-            {
-                Vector3 p = inner[i];
-                sumX += p.x;
-                sumRadius += new Vector2(p.y, p.z).magnitude;
-            }
-            float x = (float)(sumX / (end - begin)), radius = (float)(sumRadius / (end - begin));
-            points.Add(new Vector2(x, radius));
-            begin = end;
+            Vector2 sum = Vector2.zero;
+            for (end = begin; end < points.Count && points[end].x - points[begin].x <= 2e-5f; end++) sum += new Vector2(points[end].x, new Vector2(points[end].y, points[end].z).magnitude);
+            result.Add(sum / (end - begin));
         }
-        return points.ToArray();
+        return result.ToArray();
     }
 
-    static float Radius(Vector2[] points, float x, float margin)
+    public float Radius(float x, float margin = 0)
     {
         int i = 0;
-        while (i < points.Length - 2 && x > points[i + 1].x) i++;
-        Vector2 a = points[i], b = points[i + 1];
+        while (i < profile.Length - 2 && x > profile[i + 1].x) i++;
+        Vector2 a = profile[i], b = profile[i + 1];
         float slope = (b.y - a.y) / (b.x - a.x);
-        return Mathf.LerpUnclamped(a.y, b.y, (x - a.x) / (b.x - a.x)) - margin * Mathf.Sqrt(1 + slope * slope);
+        return a.y + (x - a.x) * slope - margin * Mathf.Sqrt(1 + slope * slope);
     }
 
     public bool Contains(Vector3 world, float margin = 0)
     {
-        Vector3 p = ToProfile(world);
-        if (p.x < profile[0].x + margin || p.x > profile[profile.Length - 1].x - margin) return false;
-        float radius = Radius(profile, p.x, margin);
-        return radius >= 0 && p.y * p.y + p.z * p.z <= radius * radius;
+        Vector3 p = world - center;
+        float r = Radius(p.x, margin);
+        return p.x >= profile[0].x + margin && p.x <= profile[^1].x - margin && r >= 0 && p.y * p.y + p.z * p.z <= r * r;
     }
 
-    public Vector4[] CreateFill(int count, out float spacing)
+    public Vector3[] CreateFill(int count) // lattice below the water line, evenly subsampled
     {
-        spacing = Mathf.Pow(waterVolume / count, 1f / 3f) * 0.85f;
-        float margin = spacing * .85f;
-        var candidates = new List<Vector4>(count);
-
-        for (int x = 0; ; x++)
+        float spacing = Mathf.Pow(waterVolume / count, 1f / 3) * .85f, margin = spacing * .85f;
+        var candidates = new List<Vector3>();
+        for (float x = profile[0].x + margin; x <= profile[^1].x - margin; x += spacing)
         {
-            float px = profile[0].x + margin + x * spacing;
-            if (px > profile[profile.Length - 1].x - margin) break;
-            float radius = Radius(profile, px, margin);
-            if (radius < 0) continue;
-
-            for (int y = 0; ; y++)
-            {
-                float py = waterLevel - center.y - spacing * .34f - y * spacing;
-                if (py < -maximumRadius + margin) break;
-
-                for (int z = 0; ; z++)
-                {
-                    float pz = -maximumRadius + margin + z * spacing;
-                    if (pz > maximumRadius - margin) break;
-                    if (py * py + pz * pz > radius * radius) continue;
-                    candidates.Add(new Vector4(px, py, pz, 1));
-                }
-            }
+            float r = Radius(x, margin);
+            if (r < 0) continue;
+            for (float y = waterLevel - center.y - spacing * .34f; y >= margin - maxRadius; y -= spacing)
+                for (float z = margin - maxRadius; z <= maxRadius - margin; z += spacing)
+                    if (y * y + z * z <= r * r) candidates.Add(center + new Vector3(x, y, z));
         }
-
-        var positions = new Vector4[count];
-        for (int i = 0; i < count; i++)
-            positions[i] = candidates[(int)((long)i * candidates.Count / count)];
-        return positions;
+        var result = new Vector3[count];
+        for (int i = 0; i < count; i++) result[i] = candidates[(int)((long)i * candidates.Count / count)];
+        return result;
     }
 }

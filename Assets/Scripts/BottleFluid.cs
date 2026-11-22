@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -6,157 +7,118 @@ public class BottleFluid : MonoBehaviour
     public Material particleMaterial;
     public BottleBoundary boundary;
     public ComputeShader simulation;
-    public CapsuleCollider boatCollider;
+    public bool renderSurface = true;
+    public static BottleFluid Instance;
+    [System.NonSerialized] public ComputeBuffer particles, whitewater, foamIndices, sprayIndices, foamArgs, sprayArgs;
+    [System.NonSerialized] public int particleCount;
+    [System.NonSerialized] public Vector4 waterSample; // height, flow xz, valid
+    [System.NonSerialized] public Vector3 waterNormal = Vector3.up;
 
-    const float cellSize = 4f / 75, deltaTime = 1f / 60;
-    const int substeps = 8, cellCount = 80 * 32 * 30;
+    const float cellSize = 4f / 75, tickDt = 1f / 60;
+    const int substeps = 8, cellCount = 80 * 32 * 30, whitewaterCount = 8192;
     static readonly Vector3 gridOrigin = new Vector3(-2, 0, -2) - Vector3.one * (2 * cellSize);
-    static readonly Vector3Int gridSize = new Vector3Int(80, 32, 30), gridOffset = new Vector3Int(0, 4, 25);
-    static readonly string[] kernelNames = { "CacheBoundary", "ClearGrid", "P2G", "UpdateGrid", "G2P" };
+    // Kernels in declaration order
+    const int cacheBoundary = 0, clearGrid = 1, p2g = 2, updateGrid = 3, g2p = 4, probeBoat = 5, updateWhitewater = 6;
 
-    readonly int[] kernels = new int[5];
-    ComputeBuffer particleBuf, accumulationBuf, gridBuf, boundaryBuf;
-    Material material;
-    ComputeShader solver;
-    CommandBuffer commands;
-    int particleCount;
-    float radius, backlog;
-    Vector3 previousBoatCenter;
+    readonly List<ComputeBuffer> buffers = new();
+    readonly Vector4[] probes = new Vector4[5]; // center, front, back, left, right
+    ComputeBuffer boatSample;
+    Vector3 boatA, boatB, lastCenter, lastAxis;
+    float boatRadius, backlog, nextProbe;
+    int step;
 
-    public void GetBoatCapsule(out Vector3 a, out Vector3 b, out float r)
+    void Awake() => Instance = this;
+    void OnDestroy() => Release();
+
+    static Vector3 Grid(Vector3 world) => (world - gridOrigin) / cellSize;
+
+    public void SetBoat(Vector3 a, Vector3 b, float radius, Vector3 center, Vector3 front, Vector3 right)
     {
-        Transform t = boatCollider.transform;
-        Vector3 scale = t.lossyScale;
-        scale = new Vector3(Mathf.Abs(scale.x), Mathf.Abs(scale.y), Mathf.Abs(scale.z));
-        int axis = boatCollider.direction;
-        Vector3 direction = axis == 0 ? Vector3.right : axis == 1 ? Vector3.up : Vector3.forward;
-        float radialScale = Mathf.Max(scale[(axis + 1) % 3], scale[(axis + 2) % 3]);
-        r = boatCollider.radius * radialScale;
-        float half = Mathf.Max(0, boatCollider.height * scale[axis] * .5f - r);
-        Vector3 center = t.TransformPoint(boatCollider.center);
-        Vector3 offset = t.TransformDirection(direction).normalized * half;
-        a = center - offset;
-        b = center + offset;
+        boatA = a; boatB = b; boatRadius = radius;
+        probes[0] = Grid(center); probes[1] = Grid(center + front); probes[2] = Grid(center - front); probes[3] = Grid(center - right); probes[4] = Grid(center + right);
     }
 
-    void Awake() => material = new Material(particleMaterial);
-
-    public void Init(int cnt)
+    public void Init(int count)
     {
         Release();
-        particleCount = cnt; backlog = 0;
+        particleCount = count;
+        var fill = boundary.CreateFill(count);
+        var data = new Vector4[count * 5]; // SoA: position, velocity + density ratio, affine rows
+        for (int i = 0; i < count; i++) { data[i] = Grid(fill[i]); data[i + count].w = 1; }
+        particles = Buffer(data.Length, 16); particles.SetData(data);
+        whitewater = Buffer(whitewaterCount, 48); whitewater.SetData(new float[whitewaterCount * 12]);
+        foamIndices = Buffer(whitewaterCount, 4, ComputeBufferType.Append); sprayIndices = Buffer(whitewaterCount, 4, ComputeBufferType.Append);
+        foamArgs = Buffer(4, 4, ComputeBufferType.IndirectArguments); foamArgs.SetData(new uint[] { 6, 0, 0, 0 });
+        sprayArgs = Buffer(4, 4, ComputeBufferType.IndirectArguments); sprayArgs.SetData(new uint[] { 6, 0, 0, 0 });
+        boatSample = Buffer(5, 16);
+        var names = new[] { "_Particles", "_Accumulation", "_Grid", "_Boundary", "_BoatSample", "_Whitewater", "_FoamIndices", "_SprayIndices" };
+        var values = new[] { particles, Buffer(cellCount * 2, 4), Buffer(cellCount, 16), Buffer(cellCount, 16), boatSample, whitewater, foamIndices, sprayIndices };
+        for (int k = 0; k <= updateWhitewater; k++) for (int i = 0; i < names.Length; i++) simulation.SetBuffer(k, names[i], values[i]);
 
-        var positions = boundary.CreateFill(particleCount, out float spacing);
-        radius = spacing * .34f;
-        var data = new Vector4[particleCount * 5];
-        for (int i = 0; i < particleCount; i++)
-        {
-            Vector3 world = boundary.FromProfile(positions[i]);
-            Vector3 p = (world - gridOrigin) / cellSize;
-            data[i] = new Vector4(p.x, p.y, p.z, 1);
-        }
+        var profile = new Vector4[32];
+        for (int i = 0; i < boundary.profile.Length; i++) profile[i] = boundary.profile[i] / cellSize;
+        simulation.SetVectorArray("_Profile", profile);
+        simulation.SetInt("_ProfileCount", boundary.profile.Length);
+        simulation.SetVector("_BottleCenter", Grid(boundary.center));
+        simulation.SetInt("_ParticleCount", count);
+        simulation.SetFloat("_RestDensity", count * cellSize * cellSize * cellSize / boundary.waterVolume);
+        Dispatch(cacheBoundary, cellCount);
 
-        particleBuf = new ComputeBuffer(data.Length, 16); // SoA: positions, velocities/density ratios, then the three affine rows.
-        particleBuf.SetData(data);
-        accumulationBuf = new ComputeBuffer(cellCount * 2, 4);
-        gridBuf = new ComputeBuffer(cellCount, 16);
-        boundaryBuf = new ComputeBuffer(cellCount, 16);
-
-        solver = Instantiate(simulation);
-        for (int i = 0; i < kernels.Length; i++)
-        {
-            int k = kernels[i] = solver.FindKernel(kernelNames[i]);
-            solver.SetBuffer(k, "_Particles", particleBuf);
-            solver.SetBuffer(k, "_Accumulation", accumulationBuf);
-            solver.SetBuffer(k, "_Grid", gridBuf);
-            solver.SetBuffer(k, "_StaticGridBoundary", boundaryBuf);
-        }
-
-        float restDensity = particleCount * cellSize * cellSize * cellSize / boundary.waterVolume;
-        float soundSpeed = 6 / cellSize;
-        solver.SetInt("_ParticleCount", particleCount);
-        solver.SetInt("_ParticlePlaneStride", particleCount);
-        solver.SetInt("_CellCount", cellCount);
-        solver.SetInt("_Resolution", 80);
-        solver.SetInts("_GridSize", gridSize.x, gridSize.y, gridSize.z);
-        solver.SetInts("_GridOffset", gridOffset.x, gridOffset.y, gridOffset.z);
-        solver.SetFloat("_Dt", deltaTime / substeps);
-        solver.SetFloat("_RestDensity", restDensity);
-        solver.SetFloat("_BulkModulus", restDensity * soundSpeed * soundSpeed / 3);
-        solver.SetFloat("_PressureExponent", 3);
-        solver.SetFloat("_Viscosity", .15f);
-        solver.SetVector("_Acceleration", Physics.gravity / cellSize);
-
-        var profile = new Vector4[BottleBoundary.maxProfileCount];
-        var points = boundary.profile;
-        for (int i = 0; i < points.Length; i++) profile[i] = points[i] / cellSize;
-        solver.SetVectorArray("_BottleProfile", profile);
-        solver.SetInt("_BottleProfileCount", points.Length);
-        solver.SetVector("_BottleCenter", (boundary.center - gridOrigin) / cellSize);
-        solver.SetFloat("_BottleClearance", .75f * spacing / cellSize);
-        solver.Dispatch(kernels[0], (cellCount + 127) / 128, 1, 1);
-
-        commands = new CommandBuffer { name = "Bottle MLS-MPM" };
-        GetBoatCapsule(out Vector3 a, out Vector3 b, out _);
-        previousBoatCenter = (a + b) * .5f;
-        material.SetBuffer("_Particles", particleBuf);
-        material.SetVector("_Origin", gridOrigin);
-        material.SetFloat("_CellSize", cellSize);
-        material.SetFloat("_Radius", radius);
+        Shader.SetGlobalBuffer("_Particles", particles); Shader.SetGlobalBuffer("_Whitewater", whitewater);
+        Shader.SetGlobalInteger("_ParticleCount", count);
+        Shader.SetGlobalVector("_Origin", gridOrigin);
+        Shader.SetGlobalFloat("_CellSize", cellSize);
+        Shader.SetGlobalFloat("_FluidRadius", .95f * Mathf.Pow(boundary.waterVolume / count, 1f / 3));
+        lastCenter = (boatA + boatB) * .5f; lastAxis = boatB - boatA; backlog = 0;
     }
 
     void Update()
     {
-        if (commands == null) return;
-        backlog += Time.deltaTime;
-        int ticks = Mathf.Min(4, (int)(backlog / deltaTime));
-        for (int i = 0; i < ticks; i++)
+        for (backlog = Mathf.Min(backlog + Time.deltaTime, 4 * tickDt); backlog >= tickDt; backlog -= tickDt) Tick();
+        if (Time.time < nextProbe) return;
+        nextProbe = Time.time + .1f;
+        simulation.SetVectorArray("_BoatProbes", probes);
+        simulation.Dispatch(probeBoat, 5, 1, 1);
+        AsyncGPUReadback.Request(boatSample, r =>
         {
-            GetBoatCapsule(out Vector3 a, out Vector3 b, out float r);
-            Vector3 targetCenter = (a + b) * .5f;
-            Vector3 velocity = (targetCenter - previousBoatCenter) / (deltaTime * cellSize);
-            Vector3 ga = (a - gridOrigin) / cellSize;
-            Vector3 gb = (b - gridOrigin) / cellSize;
-            commands.Clear();
-            commands.SetComputeVectorParam(solver, "_BoatVelocity", velocity);
-            commands.SetComputeVectorParam(solver, "_BoatA", new Vector4(ga.x, ga.y, ga.z, r / cellSize));
-            commands.SetComputeVectorParam(solver, "_BoatB", gb);
-            for (int step = 0; step < substeps; step++)
-            {
-                commands.DispatchCompute(solver, kernels[1], (cellCount + 127) / 128, 1, 1);
-                commands.DispatchCompute(solver, kernels[2], (particleCount + 127) / 128, 1, 1);
-                commands.DispatchCompute(solver, kernels[3], (cellCount + 127) / 128, 1, 1);
-                commands.DispatchCompute(solver, kernels[4], (particleCount + 127) / 128, 1, 1);
-            }
-            Graphics.ExecuteCommandBuffer(commands);
-            previousBoatCenter = targetCenter;
-            backlog -= deltaTime;
-        }
+            if (r.hasError) return;
+            var s = r.GetData<Vector4>();
+            Vector4 sum = Vector4.zero;
+            foreach (var v in s) if (v.w > 0) sum += v;
+            waterSample = sum.w > 0 ? sum / sum.w : Vector4.zero;
+            if (s[0].w > 0) waterSample.x = s[0].x; // height under the centre, averaged flow
+            waterNormal = Vector3.up;
+            if (s[1].w * s[2].w * s[3].w * s[4].w == 0) return;
+            Vector3 forward = (probes[1] - probes[2]) * cellSize, right = (probes[4] - probes[3]) * cellSize;
+            forward.y = s[1].x - s[2].x; right.y = s[4].x - s[3].x;
+            waterNormal = Vector3.Cross(forward, right).normalized;
+        });
     }
 
-    void LateUpdate()
+    void Tick()
     {
-        if (particleBuf == null) return;
-        Bounds drawBounds = boundary.bounds;
-        drawBounds.Expand(2 * radius);
-        Graphics.DrawProcedural(material, drawBounds, MeshTopology.Triangles, 6, particleCount, null, null, ShadowCastingMode.Off, false, gameObject.layer);
+        Vector3 center = (boatA + boatB) * .5f, axis = boatB - boatA;
+        Quaternion.FromToRotation(lastAxis, axis).ToAngleAxis(out float angle, out Vector3 spin);
+        Vector4 a = Grid(boatA); a.w = boatRadius / cellSize;
+        simulation.SetVector("_BoatA", a); simulation.SetVector("_BoatB", Grid(boatB));
+        simulation.SetVector("_BoatVelocity", (center - lastCenter) / (tickDt * cellSize));
+        simulation.SetVector("_BoatAngularVelocity", spin * (angle * Mathf.Deg2Rad / tickDt));
+        for (int i = 0; i < substeps; i++) { Dispatch(clearGrid, cellCount); Dispatch(p2g, particleCount); Dispatch(updateGrid, cellCount); Dispatch(g2p, particleCount); }
+        simulation.SetInt("_Step", step++);
+        foamIndices.SetCounterValue(0); sprayIndices.SetCounterValue(0);
+        Dispatch(updateWhitewater, whitewaterCount);
+        ComputeBuffer.CopyCount(foamIndices, foamArgs, 4); ComputeBuffer.CopyCount(sprayIndices, sprayArgs, 4);
+        lastCenter = center; lastAxis = axis;
     }
 
-    void Release()
+    void Dispatch(int kernel, int count) => simulation.Dispatch(kernel, count / 128, 1, 1);
+
+    ComputeBuffer Buffer(int count, int stride, ComputeBufferType type = ComputeBufferType.Default)
     {
-        particleBuf?.Release();
-        accumulationBuf?.Release();
-        gridBuf?.Release();
-        boundaryBuf?.Release();
-        particleBuf = null;
-        commands?.Release();
-        commands = null;
-        if (solver != null) Destroy(solver);
+        var buffer = new ComputeBuffer(count, stride, type);
+        buffers.Add(buffer);
+        return buffer;
     }
 
-    void OnDestroy()
-    {
-        Release();
-        Destroy(material);
-    }
+    void Release() { foreach (var b in buffers) b.Release(); buffers.Clear(); particles = null; }
 }

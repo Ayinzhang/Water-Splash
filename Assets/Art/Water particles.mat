@@ -22,10 +22,19 @@ Material:
   m_LockedProperties: 
   m_SavedProperties:
     serializedVersion: 3
-    m_TexEnvs: []
+    m_TexEnvs:
+    - _Reflection:
+        m_Texture: {fileID: 8900000, guid: c630c421bfdcd6046934f92fec172949, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
     m_Ints: []
-    m_Floats: []
+    m_Floats:
+    - _Refraction: 0.08
     m_Colors:
+    - _Absorption: {r: 2.5, g: 0.7, b: 0.3, a: 0}
     - _BaseColor: {r: 0.049999982, g: 0.5, b: 0.8, a: 1}
+    - _FastColor: {r: 0.17999998, g: 0.9, b: 1, a: 1}
+    - _SlowColor: {r: 0.025, g: 0.27999997, b: 0.65, a: 1}
+    - _WaterColor: {r: 0.01, g: 0.15, b: 0.32, a: 1}
   m_BuildTextureStacks: []
   m_AllowLocking: 1

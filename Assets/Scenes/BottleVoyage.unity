@@ -2207,10 +2207,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::BottleVoyage
   fluid: {fileID: 1628910117}
-  boatCollider: {fileID: 927140305}
-  waterCamera: {fileID: 2131149801}
   countText: {fileID: 1056966792}
   msText: {fileID: 2104957859}
+  modeText: {fileID: 525003994}
   tierSlider: {fileID: 1424468866}
 --- !u!136 &927140305
 CapsuleCollider:
@@ -2231,10 +2230,10 @@ CapsuleCollider:
   m_ProvidesContacts: 0
   m_Enabled: 1
   serializedVersion: 2
-  m_Radius: 0.3
+  m_Radius: 0.24
   m_Height: 1.65
   m_Direction: 2
-  m_Center: {x: 0, y: -0.035, z: -0.04}
+  m_Center: {x: -3.0989405e-10, y: 0.014476594, z: -0.03999999}
 --- !u!1 &928710330
 GameObject:
   m_ObjectHideFlags: 0
@@ -2778,6 +2777,7 @@ GameObject:
   - component: {fileID: 1146038362}
   - component: {fileID: 1146038364}
   - component: {fileID: 1146038363}
+  - component: {fileID: 1146038365}
   m_Layer: 0
   m_Name: Voyage luggage tag
   m_TagString: Untagged
@@ -2858,6 +2858,21 @@ MeshFilter:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1146038361}
   m_Mesh: {fileID: 4300000, guid: b2e7596c94047a14783b841ebe118305, type: 2}
+--- !u!114 &1146038365
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1146038361}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: be3cf7b94150638469e7d9e176866155, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::TagRope
+  voyage: {fileID: 927140304}
+  boundary: {fileID: 1628910118}
+  ropeMaterial: {fileID: 2100000, guid: e7fc37dbb0ddb7d4597edfaefa209b4c, type: 2}
 --- !u!1 &1164642083
 GameObject:
   m_ObjectHideFlags: 0
@@ -4349,7 +4364,11 @@ MonoBehaviour:
   particleMaterial: {fileID: 2100000, guid: 5dcfce8926bf9c64bbcd45dd878075ad, type: 2}
   boundary: {fileID: 1628910118}
   simulation: {fileID: 7200000, guid: ffb53028c76618648999317a5001b46e, type: 3}
-  boatCollider: {fileID: 927140305}
+  renderSurface: 1
+  whitewaterEmission: 8
+  whitewaterLifetime: 2.5
+  whitewaterSpeed: 1.2
+  whitewaterDeformation: 4
 --- !u!114 &1628910118
 MonoBehaviour:
   m_ObjectHideFlags: 0
