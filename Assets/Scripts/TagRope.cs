@@ -9,13 +9,14 @@ public class TagRope : MonoBehaviour
     const float segment = .36f / segments, radius = .0065f, step = 1f / 240, table = -.11f, glass = .035f, tagWidth = .22f;
     static readonly float diagonal = new Vector2(.11f, .3f).magnitude;
     static readonly Vector3 anchorOffset = new(-1.51f, -.04f, -.28f), windDirection = new Vector3(1, 0, .35f).normalized;
+    static readonly Vector2[] outline = { new(-.11f, -.286f), new(-.096f, -.3f), new(.096f, -.3f), new(.11f, -.286f), new(.11f, -.015f), new(.05f, .045f), new(-.05f, .045f), new(-.11f, -.015f) };
 
     // Nodes: rope 0..hole, then the tag's lower corners
     readonly Vector3[] p = new Vector3[count], prev = new Vector3[count], v = new Vector3[count];
     readonly Vector3[] vertices = new Vector3[(hole + 1) * sides], normals = new Vector3[(hole + 1) * sides];
     readonly float[] w = new float[count];
     readonly bool[] touching = new bool[count];
-    int grabbed = -1;
+    bool isGrab;
     float accumulator, time, grabDepth;
     Vector3 grabTarget, restNormal;
     Mesh mesh;
@@ -47,7 +48,7 @@ public class TagRope : MonoBehaviour
         Vector3 side = Vector3.Cross(Vector3.up, restNormal) * tagWidth * .5f;
         for (int i = 0; i <= hole; i++) p[i] = Anchor + Vector3.down * (segment * i) + restNormal * (.01f * i);
         p[left] = p[hole] + Vector3.down * .3f - side; p[right] = p[hole] + Vector3.down * .3f + side;
-        for (int i = 0; i < 480; i++) Simulate(); // settle
+        for (int i = 0; i < 240; i++) Simulate(); // settle
         LateUpdate();
     }
 
@@ -55,25 +56,29 @@ public class TagRope : MonoBehaviour
     {
         Vector2 pointer = Input.mousePosition;
         if (Input.GetMouseButtonDown(0) && !voyage.isDrag && !BottleVoyage.OnUI(pointer)) Grab(pointer);
-        if (!Input.GetMouseButton(0)) grabbed = -1;
-        else if (grabbed >= 0) grabTarget = Camera.main.ScreenPointToRay(pointer).GetPoint(grabDepth);
-        for (accumulator = Mathf.Min(accumulator + Time.deltaTime, step * 8); accumulator >= step; accumulator -= step) Simulate();
+        if (!Input.GetMouseButton(0)) isGrab = false;
+        else if (isGrab) grabTarget = Camera.main.ScreenPointToRay(pointer).GetPoint(grabDepth);
+        accumulator = Mathf.Min(accumulator + Time.deltaTime, step * 4);
+        while (accumulator >= step) { Simulate(); accumulator -= step; }
     }
 
-    void Grab(Vector2 pointer) // nearest rope node or the tag centre on screen
+    void Grab(Vector2 pointer)
     {
-        Camera camera = Camera.main;
-        float best = 34 * Mathf.Max(1, Screen.height / 720f);
-        for (int i = 3; i <= left; i++)
-        {
-            Vector3 s = camera.WorldToScreenPoint(i == left ? TagCenter : p[i]);
-            float d = Vector2.Distance(s, pointer) * (i == left ? .5f : 1); // the card is a bigger target
-            if (s.z > 0 && d < best) { best = d; grabbed = i; }
-        }
-        if (grabbed < 0) return;
-        Ray ray = camera.ScreenPointToRay(pointer);
-        grabDepth = Vector3.Dot((grabbed == left ? TagCenter : p[grabbed]) - ray.origin, ray.direction);
+        Ray ray = Camera.main.ScreenPointToRay(pointer);
+        if (!new Plane(transform.forward, transform.position).Raycast(ray, out float hit) || !Inside(transform.InverseTransformPoint(ray.GetPoint(hit)))) return;
+        grabDepth = Vector3.Dot(TagCenter - ray.origin, ray.direction);
         grabTarget = ray.GetPoint(grabDepth);
+        isGrab = true;
+    }
+
+    bool Inside(Vector3 local) // tag outline from its mesh, counter-clockwise
+    {
+        for (int i = 0; i < outline.Length; i++)
+        {
+            Vector2 a = outline[i], b = outline[(i + 1) % outline.Length];
+            if ((b.x - a.x) * (local.y - a.y) - (b.y - a.y) * (local.x - a.x) < 0) return false;
+        }
+        return true;
     }
 
     Vector3 Wind()
@@ -100,8 +105,7 @@ public class TagRope : MonoBehaviour
             for (int i = 0; i < segments - 1; i++) Distance(i, i + 2, segment * 2, .35f); // bending
             Distance(hole, left, diagonal, 0); Distance(hole, right, diagonal, 0); Distance(left, right, tagWidth, 0);
             Twist();
-            if (grabbed == left) { Vector3 shift = (grabTarget - TagCenter) * .35f; p[hole] += shift; p[left] += shift; p[right] += shift; }
-            else if (grabbed >= 0) p[grabbed] += (grabTarget - p[grabbed]) * .5f;
+            if (isGrab) { Vector3 shift = (grabTarget - TagCenter) * .35f; p[hole] += shift; p[left] += shift; p[right] += shift; }
         }
         for (int i = 1; i < count; i++)
         {

@@ -4,7 +4,7 @@
 #pragma kernel UpdateGrid
 #pragma kernel G2P
 #pragma kernel ProbeBoat
-#pragma kernel UpdateWhitewater
+#pragma kernel UpdateWhiteWater
 
 static const float CellSize = 4.0 / 75, Dt = 1.0 / 480, TickDt = 1.0 / 60, Viscosity = .15;
 static const float MassScale = 512, MomentumScale = 32; // Packed16 atomics
@@ -287,7 +287,7 @@ void Collide(inout Whitewater p)
 }
 
 [numthreads(128, 1, 1)]
-void UpdateWhitewater(uint id : SV_DispatchThreadID)
+void UpdateWhiteWater(uint id : SV_DispatchThreadID)
 {
     Whitewater p = _Whitewater[id];
     float3 normal = 0; float gradientSize = 0;
